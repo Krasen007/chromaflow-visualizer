@@ -3,7 +3,6 @@ node_modules/
 dist/
 .vite/
 *.local
-todo/
 
 # Editor / OS cruft
 .DS_Store
@@ -12,4 +11,8 @@ Thumbs.db
 .vscode/
 .cache/server.pem
 fiveserver.config.js
+
+# Working notes — design guidance and analysis docs that are deliberately not
+# part of the published site (the site is everything else in this repo).
+todo/
 reports/codebase-taste-analysis.md

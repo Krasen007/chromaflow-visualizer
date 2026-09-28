@@ -1,6 +1,6 @@
 import { AudioEngine, sensitivityNames } from './audio.js';
 
-const canvas = document.querySelector('#visualizer');
+const root = document.querySelector('#visualizer');
 const colorValue = document.querySelector('#colorValue');
 const rgbValue = document.querySelector('#rgbValue');
 const frameValue = document.querySelector('#frameValue');
@@ -15,6 +15,7 @@ const motionSpeedLabel = document.querySelector('#motionSpeedLabel');
 const prompt = document.querySelector('#centerPrompt');
 const mixButton = document.querySelector('#mixButton');
 const menuTab = document.querySelector('#menuTab');
+const closeMenuButton = document.querySelector('#closeMenuButton');
 const effectButtons = [...document.querySelectorAll('.effect-toggle')];
 const ambientOne = document.querySelector('.ambient-one');
 const livePill = document.querySelector('.live-pill');
@@ -47,14 +48,15 @@ const motionProfiles = [
   { orbit: '3.2s', wave: '1.7s', liquid: '3.6s', prism: '2.8s' },
 ];
 const effects = { objects: false, waves: false, liquid: false, prism: false };
-const HIDE_DELAY = 2200;
 let speed = Number(speedRange.value);
 let motionSpeed = Number(motionSpeedRange.value);
 let playing = true;
 let frame = 1;
 let timer;
 let promptTimer;
-let hideTimer;
+let micStartPending = false;
+let screenWakeLock = null;
+let wakeLockPending = false;
 
 /* ---------- audio state ---------- */
 const BAR_COUNT = 72; // spectrum bars across the strip
@@ -78,11 +80,37 @@ let sensitivity = Number(sensitivityRange.value);
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
+async function keepScreenAwake() {
+  if (screenWakeLock || wakeLockPending || document.visibilityState !== 'visible' || !navigator.wakeLock?.request) return;
+  wakeLockPending = true;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    if (document.visibilityState !== 'visible') {
+      await lock.release();
+      return;
+    }
+    screenWakeLock = lock;
+    lock.addEventListener('release', () => {
+      if (screenWakeLock === lock) screenWakeLock = null;
+    });
+  } catch {
+    // Wake lock may be unavailable or denied; the visualizer remains usable.
+  } finally {
+    wakeLockPending = false;
+  }
+}
+
+async function releaseScreenWakeLock() {
+  const lock = screenWakeLock;
+  screenWakeLock = null;
+  try { await lock?.release(); } catch {}
+}
+
 function randomColor() {
-  const hue = Math.floor(Math.random() * 360);
+  const baseHue = Math.floor(Math.random() * 360);
   const saturation = 62 + Math.floor(Math.random() * 30);
   const lightness = 42 + Math.floor(Math.random() * 20);
-  return hslToRgb(hue, saturation, lightness);
+  return hslToRgb(baseHue, saturation, lightness);
 }
 
 function hslToRgb(h, s, l) {
@@ -106,16 +134,16 @@ function randomDeg(min, max) {
 }
 
 function randomizeObjects() {
-  canvas.style.setProperty('--square-x', randomVw(-42, 42));
-  canvas.style.setProperty('--square-y', randomVw(-35, 35));
-  canvas.style.setProperty('--square-scale', (0.45 + Math.random() * 1.45).toFixed(2));
-  canvas.style.setProperty('--square-rotate', randomDeg(-180, 180));
-  canvas.style.setProperty('--square-delay', `${(Math.random() * -5).toFixed(2)}s`);
-  canvas.style.setProperty('--triangle-x', randomVw(-42, 42));
-  canvas.style.setProperty('--triangle-y', randomVw(-35, 35));
-  canvas.style.setProperty('--triangle-scale', (0.45 + Math.random() * 1.55).toFixed(2));
-  canvas.style.setProperty('--triangle-rotate', randomDeg(-180, 180));
-  canvas.style.setProperty('--triangle-delay', `${(Math.random() * -5).toFixed(2)}s`);
+  root.style.setProperty('--square-x', randomVw(-42, 42));
+  root.style.setProperty('--square-y', randomVw(-35, 35));
+  root.style.setProperty('--square-scale', (0.45 + Math.random() * 1.45).toFixed(2));
+  root.style.setProperty('--square-rotate', randomDeg(-180, 180));
+  root.style.setProperty('--square-delay', `${(Math.random() * -5).toFixed(2)}s`);
+  root.style.setProperty('--triangle-x', randomVw(-42, 42));
+  root.style.setProperty('--triangle-y', randomVw(-35, 35));
+  root.style.setProperty('--triangle-scale', (0.45 + Math.random() * 1.55).toFixed(2));
+  root.style.setProperty('--triangle-rotate', randomDeg(-180, 180));
+  root.style.setProperty('--triangle-delay', `${(Math.random() * -5).toFixed(2)}s`);
 }
 
 /* Maps the BAR_COUNT bars onto log-spaced frequency ranges so low bass notes
@@ -175,15 +203,15 @@ function drawSpectrum(dt) {
 
     ctx.fillStyle = `hsla(${huePart}, 100%, 58%, .20)`;
     ctx.fillRect(x - 1, center - height - 1, barWidth + 2, height * 2 + 2);
-    ctx.fillStyle = `hsla(${huePart}, 100%, 66%, .92)`;
+    ctx.fillStyle = `hsla(${huePart}, 100%, 66%, .58)`;
     ctx.fillRect(x, center - height, barWidth, height * 2);
-    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    ctx.fillStyle = 'rgba(255,255,255,.48)';
     ctx.fillRect(x, center - height, barWidth, 1.5);
 
     peaks[i] = Math.max(value, peaks[i] - dt * 0.55);
     if (peaks[i] > 0.02) {
       const capHeight = peaks[i] * reach;
-      ctx.fillStyle = 'rgba(255,255,255,.55)';
+      ctx.fillStyle = 'rgba(255,255,255,.32)';
       ctx.fillRect(x, center - capHeight - 3, barWidth, 1.5);
     }
   }
@@ -252,9 +280,9 @@ function applyAudioColor(snapshot, dt) {
   const rgb = hslToRgb(hue, saturation, lightness);
   const hex = toHex(rgb);
   accentHue = (hue + 180) % 360;
-  canvas.style.backgroundColor = hex;
+  root.style.backgroundColor = hex;
   ambientOne.style.backgroundColor = hex;
-  canvas.style.setProperty('--accent', `hsl(${Math.round(accentHue)} 95% 62%)`);
+  root.style.setProperty('--accent', `hsl(${Math.round(accentHue)} 95% 62%)`);
   return { hex, rgb };
 }
 
@@ -265,11 +293,11 @@ function audioFrame() {
   const dt = clamp((now - lastFrameTime) / 1000, 0.008, 0.1);
   lastFrameTime = now;
 
-  canvas.style.setProperty('--level', snapshot.level.toFixed(3));
-  canvas.style.setProperty('--bass', snapshot.bass.toFixed(3));
-  canvas.style.setProperty('--mid', snapshot.mid.toFixed(3));
-  canvas.style.setProperty('--treble', snapshot.treble.toFixed(3));
-  canvas.style.setProperty('--beat', snapshot.pulse.toFixed(3));
+  root.style.setProperty('--level', snapshot.level.toFixed(3));
+  root.style.setProperty('--bass', snapshot.bass.toFixed(3));
+  root.style.setProperty('--mid', snapshot.mid.toFixed(3));
+  root.style.setProperty('--treble', snapshot.treble.toFixed(3));
+  root.style.setProperty('--beat', snapshot.pulse.toFixed(3));
   if (!reduceMotion.matches) beatFlash.style.opacity = (snapshot.pulse * 0.3).toFixed(3);
   levelFill.style.width = `${(snapshot.level * 100).toFixed(1)}%`;
   if (snapshot.beat) onBeat(snapshot);
@@ -295,18 +323,18 @@ function audioFrame() {
 /* ---------- microphone controls ---------- */
 const MIC_ERRORS = {
   'NO-SECURE-CONTEXT': 'MIC NEEDS A SECURE CONTEXT — OPEN THE PAGE OVER HTTPS OR http://localhost.',
-  NotAllowedError: 'MIC PERMISSION BLOCKED — ALLOW IT IN THE ADDRESS BAR, THEN PRESS M AGAIN.',
+  NotAllowedError: 'MIC PERMISSION BLOCKED — ALLOW IT IN THE ADDRESS BAR, THEN TRY AGAIN.',
   NotFoundError: 'NO MICROPHONE FOUND ON THIS DEVICE.',
   NotReadableError: 'THE MICROPHONE IS ALREADY IN USE BY ANOTHER APP.',
   OverconstrainedError: 'NO MICROPHONE MATCHES THE REQUESTED SETTINGS.',
 };
 
 function describeMicError(error) {
-  return MIC_ERRORS[error?.name] ?? MIC_ERRORS[error?.message] ?? `MIC COULD NOT START — ${error?.message ?? 'UNKNOWN ERROR'}.`;
+  return MIC_ERRORS[error?.name] ?? `MIC COULD NOT START — ${error?.message ?? 'UNKNOWN ERROR'}.`;
 }
 
 function setSpectrumVisible(visible) {
-  canvas.classList.toggle('spectrum-visible', visible && audio.running);
+  root.classList.toggle('spectrum-visible', visible && audio.running);
 }
 
 async function toggleMicrophone() {
@@ -314,6 +342,8 @@ async function toggleMicrophone() {
     stopMicrophone();
     return;
   }
+  if (micStartPending) return;
+  micStartPending = true;
   micError.hidden = true;
   micButton.disabled = true;
   micStatus.textContent = 'CONNECTING';
@@ -322,6 +352,7 @@ async function toggleMicrophone() {
     audio.setSensitivity(sensitivity);
     buildBarBins();
     resizeSpectrum();
+    schedule(); // the interval stands down while the microphone owns the background
     audio.stream.getAudioTracks().forEach((track) => track.addEventListener('ended', stopMicrophone, { once: true }));
     setSpectrumVisible(spectrumEnabled);
     document.body.classList.add('mic-active');
@@ -336,11 +367,12 @@ async function toggleMicrophone() {
     readoutClock = 1; // refresh the readouts on the very first frame
     audioFrameId = requestAnimationFrame(audioFrame);
   } catch (error) {
-    audio.stop();
+    await audio.stop();
     micStatus.textContent = 'OFFLINE';
     micError.textContent = describeMicError(error);
     micError.hidden = false;
   } finally {
+    micStartPending = false;
     micButton.disabled = false;
   }
 }
@@ -350,9 +382,9 @@ function stopMicrophone() {
   cancelAnimationFrame(audioFrameId);
   audioFrameId = 0;
   document.body.classList.remove('mic-active');
-  canvas.classList.remove('spectrum-visible');
-  ['--level', '--bass', '--mid', '--treble', '--beat'].forEach((name) => canvas.style.setProperty(name, '0'));
-  canvas.style.setProperty('--accent', '#a3ff12');
+  root.classList.remove('spectrum-visible');
+  ['--level', '--bass', '--mid', '--treble', '--beat'].forEach((name) => root.style.setProperty(name, '0'));
+  root.style.setProperty('--accent', '#a3ff12');
   beatFlash.style.opacity = '0';
   levelFill.style.width = '0%';
   while (ripples.length) recycleRipple(ripples.pop());
@@ -367,6 +399,8 @@ function stopMicrophone() {
   bpmValue.textContent = 'BPM —';
   beatValue.textContent = 'BEATS 0';
   spectrumContext.clearRect(0, 0, stripWidth, stripHeight);
+  schedule(); // hand the background back to the interval
+  if (playing) applyColor(); // ...and restart the flow now rather than after a full tick
   showMenu();
 }
 
@@ -388,10 +422,9 @@ function setSpectrumEnabled(enabled) {
 }
 
 function applyColor() {
-  if (audio.running) return; // the microphone owns the background while listening
   const rgb = randomColor();
   const hex = toHex(rgb);
-  canvas.style.backgroundColor = hex;
+  root.style.backgroundColor = hex;
   colorValue.textContent = hex;
   rgbValue.textContent = `RGB ${rgb.join(' · ')}`;
   frameValue.textContent = `FRAME ${String(frame).padStart(4, '0')}`;
@@ -404,23 +437,16 @@ function applyColor() {
 
 function schedule() {
   clearInterval(timer);
-  if (playing) timer = setInterval(applyColor, intervals[speed - 1]);
+  // While the mic runs the animation loop owns the background, so there is nothing to schedule.
+  if (playing && !audio.running) timer = setInterval(applyColor, intervals[speed - 1]);
 }
 
 function showMenu() {
-  clearTimeout(hideTimer);
-  canvas.classList.remove('menu-hidden');
-  if (playing) hideTimer = setTimeout(hideMenu, HIDE_DELAY);
+  root.classList.remove('menu-hidden');
 }
 
 function hideMenu() {
-  if (playing) canvas.classList.add('menu-hidden');
-}
-
-function syncMenu() {
-  clearTimeout(hideTimer);
-  if (playing) showMenu();
-  else canvas.classList.remove('menu-hidden');
+  root.classList.add('menu-hidden');
 }
 
 function setPlaying(nextPlaying) {
@@ -431,7 +457,6 @@ function setPlaying(nextPlaying) {
   toggleIcon.textContent = playing ? 'Ⅱ' : '▶';
   toggleLabel.textContent = playing ? 'Pause flow' : 'Resume flow';
   schedule();
-  syncMenu();
 }
 
 function setSpeed(nextSpeed) {
@@ -448,12 +473,12 @@ function setMotionSpeed(nextSpeed) {
   motionSpeedRange.value = String(motionSpeed);
   motionSpeedLabel.textContent = motionNames[motionSpeed - 1];
   motionSpeedRange.style.background = `linear-gradient(90deg, #fff ${(motionSpeed - 1) * 25}%, rgba(255,255,255,.20) ${(motionSpeed - 1) * 25}%)`;
-  Object.entries(profile).forEach(([name, duration]) => canvas.style.setProperty(`--${name}-duration`, duration));
+  Object.entries(profile).forEach(([name, duration]) => root.style.setProperty(`--${name}-duration`, duration));
 }
 
 function setEffect(name, enabled) {
   effects[name] = enabled;
-  canvas.classList.toggle(`effect-${name}`, enabled);
+  root.classList.toggle(`effect-${name}`, enabled);
   const button = effectButtons.find((item) => item.dataset.effect === name);
   button?.setAttribute('aria-pressed', String(enabled));
   button?.classList.toggle('is-active', enabled);
@@ -480,22 +505,38 @@ setSpectrumEnabled(spectrumEnabled);
 randomizeObjects();
 resizeSpectrum();
 showMenu();
+keepScreenAwake();
 new ResizeObserver(resizeSpectrum).observe(spectrumCanvas);
 window.addEventListener('resize', resizeSpectrum);
 window.addEventListener('pagehide', () => { if (audio.running) stopMicrophone(); });
-toggleButton.addEventListener('click', (event) => { event.stopPropagation(); setPlaying(!playing); });
-fullscreenButton.addEventListener('click', (event) => { event.stopPropagation(); toggleFullscreen(); });
-speedRange.addEventListener('input', (event) => { event.stopPropagation(); setSpeed(Number(event.target.value)); });
-motionSpeedRange.addEventListener('input', (event) => { event.stopPropagation(); setMotionSpeed(Number(event.target.value)); showMenu(); });
-effectButtons.forEach((button) => button.addEventListener('click', (event) => { event.stopPropagation(); const name = button.dataset.effect; setEffect(name, !effects[name]); showMenu(); }));
-mixButton.addEventListener('click', (event) => { event.stopPropagation(); setAllEffects(!Object.values(effects).every(Boolean)); showMenu(); });
-micButton.addEventListener('click', (event) => { event.stopPropagation(); toggleMicrophone(); showMenu(); });
-sensitivityRange.addEventListener('input', (event) => { event.stopPropagation(); setSensitivity(Number(event.target.value)); showMenu(); });
-spectrumButton.addEventListener('click', (event) => { event.stopPropagation(); setSpectrumEnabled(!spectrumEnabled); });
-menuTab.addEventListener('click', (event) => { event.stopPropagation(); showMenu(); });
-canvas.addEventListener('click', (event) => { if (!event.target.closest('button, input')) { if (audio.running) hueBias = Math.random() * 360; else applyColor(); showMenu(); } });
-document.addEventListener('pointermove', showMenu, { passive: true });
-document.addEventListener('pointerdown', showMenu, { passive: true });
-document.addEventListener('touchstart', showMenu, { passive: true });
-document.addEventListener('fullscreenchange', () => { fullscreenButton.setAttribute('aria-label', document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'); fullscreenButton.querySelector('span').textContent = document.fullscreenElement ? '⤢' : '⛶'; });
-document.addEventListener('keydown', (event) => { showMenu(); if (event.target.matches?.('input')) return; if (event.code === 'Space') { event.preventDefault(); setPlaying(!playing); } if (event.key === 'ArrowUp') setSpeed(speed + 1); if (event.key === 'ArrowDown') setSpeed(speed - 1); if (event.key.toLowerCase() === 'f') toggleFullscreen(); if (event.key.toLowerCase() === 'm') toggleMicrophone(); });
+window.addEventListener('pagehide', releaseScreenWakeLock);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepScreenAwake();
+  else releaseScreenWakeLock();
+});
+
+/* Clicks are filtered in exactly one place: the root handler ignores anything that landed on a
+   control, so the individual handlers never need to stop propagation themselves. */
+const CONTROL_SELECTOR = 'button, input, summary, a[href]';
+
+toggleButton.addEventListener('click', () => setPlaying(!playing));
+fullscreenButton.addEventListener('click', () => toggleFullscreen());
+speedRange.addEventListener('input', (event) => setSpeed(Number(event.target.value)));
+motionSpeedRange.addEventListener('input', (event) => { setMotionSpeed(Number(event.target.value)); showMenu(); });
+effectButtons.forEach((button) => button.addEventListener('click', () => { setEffect(button.dataset.effect, !effects[button.dataset.effect]); showMenu(); }));
+mixButton.addEventListener('click', () => { setAllEffects(!Object.values(effects).every(Boolean)); showMenu(); });
+micButton.addEventListener('click', () => { toggleMicrophone(); showMenu(); });
+sensitivityRange.addEventListener('input', (event) => { setSensitivity(Number(event.target.value)); showMenu(); });
+spectrumButton.addEventListener('click', () => setSpectrumEnabled(!spectrumEnabled));
+menuTab.addEventListener('click', () => showMenu());
+closeMenuButton.addEventListener('click', hideMenu);
+root.addEventListener('click', (event) => {
+  if (event.target.closest?.(CONTROL_SELECTOR)) return; // the click belonged to a control
+  if (audio.running) hueBias = Math.random() * 360; else applyColor();
+});
+document.addEventListener('fullscreenchange', () => {
+  const label = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen';
+  fullscreenButton.setAttribute('aria-label', label);
+  fullscreenButton.setAttribute('title', label);
+  fullscreenButton.querySelector('span').textContent = document.fullscreenElement ? '⤢' : '⛶';
+});

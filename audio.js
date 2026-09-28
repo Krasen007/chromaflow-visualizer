@@ -16,7 +16,7 @@
  */
 
 const FFT_SIZE = 2048;
-const HISTORY_SIZE = 48; // ~0.8 s of bass energy at 60 fps
+const HISTORY_SIZE = 48; // ~0.8 s of per-band energy at 60 fps
 const WARMUP_FRAMES = 16; // let the analyser settle before trusting the first beat
 const MIN_BEAT_INTERVAL = 0.16; // s — caps detection at ~375 BPM
 const BEAT_WINDOW = 10; // beat-to-beat intervals kept for the BPM average
@@ -34,6 +34,13 @@ function smooth(current, target, attack, release) {
   return current + (target - current) * (target > current ? attack : release);
 }
 
+/** An Error carrying a stable `name`, so callers can look failures up instead of matching text. */
+function namedError(name, message) {
+  const error = new Error(message);
+  error.name = name;
+  return error;
+}
+
 /** Maps a raw 0-255 band average to a usable 0-1 energy with the noise floor lifted out. */
 function normalizeBand(average) {
   return clamp01((average - 52) / 150);
@@ -49,14 +56,18 @@ export class AudioEngine {
     this.waveform = null;
     this.bandBins = null;
     this.hzPerBin = 0;
-    this.bassHistory = new Float32Array(HISTORY_SIZE);
+    this.onsetHistories = {
+      bass: new Float32Array(HISTORY_SIZE),
+      mid: new Float32Array(HISTORY_SIZE),
+      treble: new Float32Array(HISTORY_SIZE),
+    };
     this.historyCursor = 0;
     this.historyFilled = 0;
     this.sensitivity = 3;
     this.bpm = 0;
     this.beatCount = 0;
     this.lastBeatAt = 0;
-    this.lastBass = 0;
+    this.lastBandEnergies = { bass: 0, mid: 0, treble: 0 };
     this.intervals = [];
     this.snapshot = this.emptySnapshot();
   }
@@ -71,38 +82,45 @@ export class AudioEngine {
 
   async start() {
     if (this.running) return;
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('NO-SECURE-CONTEXT');
+    if (!navigator.mediaDevices?.getUserMedia) throw namedError('NO-SECURE-CONTEXT', 'getUserMedia is not available here.');
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    const context = new AudioContextClass();
-    const analyser = context.createAnalyser();
-    analyser.fftSize = FFT_SIZE;
-    analyser.smoothingTimeConstant = 0.72;
-    const source = context.createMediaStreamSource(stream);
-    // Deliberately not connected to `destination`: routing the mic back out to the
-    // speakers would build a feedback loop.
-    source.connect(analyser);
-    if (context.state === 'suspended') await context.resume();
-
     this.stream = stream;
-    this.context = context;
-    this.source = source;
-    this.analyser = analyser;
-    this.frequency = new Uint8Array(analyser.frequencyBinCount);
-    this.waveform = new Uint8Array(analyser.fftSize);
-    this.hzPerBin = context.sampleRate / analyser.fftSize;
-    this.bandBins = Object.fromEntries(
-      Object.entries(BANDS).map(([name, [low, high]]) => [name, [this.binFor(low), this.binFor(high)]]),
-    );
-    this.reset();
+    try {
+      const context = new AudioContextClass();
+      this.context = context;
+      const analyser = context.createAnalyser();
+      this.analyser = analyser;
+      analyser.fftSize = FFT_SIZE;
+      analyser.smoothingTimeConstant = 0.72;
+      const source = context.createMediaStreamSource(stream);
+      this.source = source;
+      // Deliberately not connected to `destination`: routing the mic back out to the
+      // speakers would build a feedback loop.
+      source.connect(analyser);
+      if (context.state === 'suspended') await context.resume();
+
+      this.frequency = new Uint8Array(analyser.frequencyBinCount);
+      this.waveform = new Uint8Array(analyser.fftSize);
+      this.hzPerBin = context.sampleRate / analyser.fftSize;
+      this.bandBins = Object.fromEntries(
+        Object.entries(BANDS).map(([name, [low, high]]) => [name, [this.binFor(low), this.binFor(high)]]),
+      );
+      this.reset();
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
   }
 
-  stop() {
-    this.stream?.getTracks().forEach((track) => track.stop());
-    this.source?.disconnect();
-    this.context?.close?.();
+  async stop() {
+    this.stream?.getTracks().forEach((track) => {
+      try { track.stop(); } catch {}
+    });
+    try { this.source?.disconnect(); } catch {}
+    const context = this.context;
     this.stream = null;
     this.source = null;
     this.analyser = null;
@@ -111,16 +129,17 @@ export class AudioEngine {
     this.waveform = null;
     this.bandBins = null;
     this.reset();
+    try { await context?.close?.(); } catch {}
   }
 
   reset() {
-    this.bassHistory.fill(0);
+    Object.values(this.onsetHistories).forEach((history) => history.fill(0));
     this.historyCursor = 0;
     this.historyFilled = 0;
     this.bpm = 0;
     this.beatCount = 0;
     this.lastBeatAt = 0;
-    this.lastBass = 0;
+    this.lastBandEnergies = { bass: 0, mid: 0, treble: 0 };
     this.intervals.length = 0;
     this.snapshot = this.emptySnapshot();
   }
@@ -128,7 +147,6 @@ export class AudioEngine {
   setSensitivity(value) {
     this.sensitivity = Math.max(1, Math.min(5, value));
   }
-
 
   binFor(hz) {
     const bins = this.frequency.length;
@@ -158,14 +176,18 @@ export class AudioEngine {
     }
 
     const snapshot = this.snapshot;
-    const bassEnergy = this.bandEnergy(this.bandBins.bass);
+    const energies = {
+      bass: this.bandEnergy(this.bandBins.bass),
+      mid: this.bandEnergy(this.bandBins.mid),
+      treble: this.bandEnergy(this.bandBins.treble),
+    };
     snapshot.level = smooth(snapshot.level, clamp01(Math.sqrt(sumSquares / waveform.length) * 2.8), 0.5, 0.09);
-    snapshot.bass = smooth(snapshot.bass, bassEnergy, 0.6, 0.11);
-    snapshot.mid = smooth(snapshot.mid, this.bandEnergy(this.bandBins.mid), 0.5, 0.1);
-    snapshot.treble = smooth(snapshot.treble, this.bandEnergy(this.bandBins.treble), 0.5, 0.1);
+    snapshot.bass = smooth(snapshot.bass, energies.bass, 0.6, 0.11);
+    snapshot.mid = smooth(snapshot.mid, energies.mid, 0.5, 0.1);
+    snapshot.treble = smooth(snapshot.treble, energies.treble, 0.5, 0.1);
     snapshot.centroid = this.spectralCentroid();
     snapshot.pulse *= 0.88;
-    snapshot.beat = this.detectBeat(bassEnergy, now);
+    snapshot.beat = this.detectBeat(energies, now);
     if (snapshot.beat) {
       snapshot.pulse = 1;
       this.beatCount += 1;
@@ -186,32 +208,45 @@ export class AudioEngine {
   }
 
   /**
-   * Onset detection on the bass band. The new energy has to clear an adaptive
-   * threshold (running average x sensitivity), the noise floor, a small rise over
-   * the previous frame, and the minimum gap since the last beat.
+   * Onset detection across bass, mid, and treble. A transient in any band can
+   * clear its adaptive threshold, noise floor, and minimum gap.
    */
-  detectBeat(bassEnergy, now) {
-    let sum = 0;
-    for (let i = 0; i < this.historyFilled; i += 1) sum += this.bassHistory[i];
-    const average = this.historyFilled > 0 ? sum / this.historyFilled : 0;
-    const threshold = Math.max(average * SENSITIVITY_MULTIPLIERS[this.sensitivity - 1], SILENCE_FLOOR);
+  detectBeat(energies, now) {
+    if (this.lastBeatAt && now - this.lastBeatAt > 1.3) {
+      this.bpm = 0;
+      this.intervals.length = 0;
+    }
 
-    this.bassHistory[this.historyCursor] = bassEnergy;
+    let isBeat = false;
+    let strength = 0;
+    for (const band of Object.keys(this.onsetHistories)) {
+      const history = this.onsetHistories[band];
+      let sum = 0;
+      for (let i = 0; i < this.historyFilled; i += 1) sum += history[i];
+      const threshold = Math.max(
+        (this.historyFilled > 0 ? sum / this.historyFilled : 0) * SENSITIVITY_MULTIPLIERS[this.sensitivity - 1],
+        SILENCE_FLOOR,
+      );
+      const energy = energies[band];
+      const rising = energy > this.lastBandEnergies[band] * 1.02;
+      if (energy > threshold) {
+        strength = Math.max(strength, (energy - threshold) / Math.max(threshold, 0.001));
+        if (rising) isBeat = true;
+      }
+      this.lastBandEnergies[band] = energy;
+      history[this.historyCursor] = energy;
+    }
     this.historyCursor = (this.historyCursor + 1) % HISTORY_SIZE;
     this.historyFilled = Math.min(this.historyFilled + 1, HISTORY_SIZE);
 
-    const rising = bassEnergy > this.lastBass * 1.02;
-    this.lastBass = bassEnergy;
-
-    const isBeat =
-      this.historyFilled > WARMUP_FRAMES &&
-      bassEnergy > threshold &&
-      rising &&
-      now - this.lastBeatAt > MIN_BEAT_INTERVAL;
-
+    isBeat = isBeat && this.historyFilled > WARMUP_FRAMES && now - this.lastBeatAt > MIN_BEAT_INTERVAL;
     if (!isBeat) return false;
 
     const gap = now - this.lastBeatAt;
+    if (gap > 1.3) {
+      this.bpm = 0;
+      this.intervals.length = 0;
+    }
     this.lastBeatAt = now;
     if (gap > 0.28 && gap < 1.3) {
       this.intervals.push(gap);
@@ -221,7 +256,7 @@ export class AudioEngine {
         this.bpm = bpm > 55 && bpm < 200 ? Math.round(bpm) : 0;
       }
     }
-    this.snapshot.strength = clamp01((bassEnergy - threshold) / Math.max(threshold, 0.001));
+    this.snapshot.strength = clamp01(strength);
     return true;
   }
 }

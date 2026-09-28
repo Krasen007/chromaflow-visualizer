@@ -5,7 +5,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0a0a0a" />
-  <meta name="description" content="Chroma Flow — a rapid, full-screen random color visualizer." />
+  <meta name="description"
+    content="Chroma Flow — a full-screen color visualizer. Random colors cycle by default; enable the microphone and sound drives the color, ripples, and an FFT spectrum." />
   <link rel="icon" type="image/svg+xml" href="./chroma-flow-icon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -45,6 +46,8 @@
           <h1>Flow Visualizer</h1>
         </div>
         <span class="live-pill"><i></i> LIVE</span>
+        <button class="icon-control hud-close" id="closeMenuButton" type="button" aria-label="Close controls"
+          title="Close controls"><span aria-hidden="true">×</span></button>
       </header>
 
       <div class="readout">
@@ -57,33 +60,21 @@
       <div class="controls">
         <button class="primary-control" id="toggleButton" type="button" aria-label="Pause color cycling"
           aria-pressed="false"><span class="button-icon" id="toggleIcon">Ⅱ</span><span id="toggleLabel">Pause
-            flow</span><span class="shortcut">SPACE</span></button>
-        <button class="icon-control" id="fullscreenButton" type="button"
-          aria-label="Enter fullscreen"><span>⛶</span></button>
-      </div>
-
-      <div class="audio-control">
-        <div class="speed-heading"><span>AUDIO INPUT</span><strong id="micStatus">OFFLINE</strong></div>
-        <button class="mic-control" id="micButton" type="button" aria-pressed="false"
-          aria-label="Enable microphone input"><span class="mic-icon">◉</span><span id="micLabel">Enable
-            microphone</span><span class="shortcut">M</span></button>
-        <p class="mic-error" id="micError" role="status" hidden></p>
-        <div class="audio-meters">
-          <div class="level-meter" aria-hidden="true"><i id="levelFill"></i></div>
-          <div class="audio-readout"><span id="bpmValue">BPM —</span><span id="beatValue">BEATS 0</span></div>
-        </div>
-        <div class="speed-heading audio-sens"><span>BEAT SENSITIVITY</span><strong id="sensitivityLabel">MEDIUM</strong>
-        </div>
-        <input id="sensitivityRange" type="range" min="1" max="5" value="3" step="1"
-          aria-label="Beat detection sensitivity" />
-        <button class="fft-toggle" id="spectrumButton" type="button" aria-pressed="true"><span>FFT
-            SPECTRUM</span><strong id="spectrumToggleLabel">ON</strong></button>
+            flow</span></button>
+        <button class="icon-control" id="fullscreenButton" type="button" aria-label="Enter fullscreen"
+          title="Enter fullscreen"><span>⛶</span></button>
       </div>
 
       <div class="speed-control">
         <div class="speed-heading"><span>FLOW SPEED</span><strong id="speedLabel">FAST</strong></div>
         <input id="speedRange" type="range" min="1" max="5" value="4" step="1" aria-label="Flow speed" />
         <div class="range-labels"><span>CALM</span><span>RAPID</span></div>
+      </div>
+
+      <div class="motion-control">
+        <div class="speed-heading"><span>MOTION SPEED</span><strong id="motionSpeedLabel">FAST</strong></div>
+        <input id="motionSpeedRange" type="range" min="1" max="5" value="4" step="1" aria-label="Effect motion speed" />
+        <div class="range-labels"><span>FLOAT</span><span>TURBO</span></div>
       </div>
 
       <div class="effects-control">
@@ -99,17 +90,30 @@
           <button class="effect-toggle" type="button" data-effect="prism" aria-pressed="false"><span
               class="effect-symbol prism-symbol">✦</span><span><strong>Prism</strong><small>SHIFT</small></span><i></i></button>
         </div>
-        <p class="effects-note">MULTIPLE EFFECTS CAN RUN TOGETHER</p>
       </div>
 
-      <div class="motion-control">
-        <div class="speed-heading"><span>MOTION SPEED</span><strong id="motionSpeedLabel">FAST</strong></div>
-        <input id="motionSpeedRange" type="range" min="1" max="5" value="4" step="1" aria-label="Effect motion speed" />
-        <div class="range-labels"><span>FLOAT</span><span>TURBO</span></div>
+      <div class="audio-control">
+        <div class="speed-heading"><span>AUDIO INPUT</span><strong id="micStatus">OFFLINE</strong></div>
+        <button class="mic-control" id="micButton" type="button" aria-pressed="false"
+          aria-label="Enable microphone input"><span class="mic-icon">◉</span><span id="micLabel">Enable
+            microphone</span></button>
+        <p class="mic-error" id="micError" role="status" hidden></p>
+        <div class="audio-meters">
+          <div class="level-meter" aria-hidden="true"><i id="levelFill"></i></div>
+          <div class="audio-readout"><span id="bpmValue">BPM —</span><span id="beatValue">BEATS 0</span></div>
+        </div>
+        <button class="fft-toggle" id="spectrumButton" type="button" aria-pressed="true"><span>FFT
+            SPECTRUM</span><strong id="spectrumToggleLabel">ON</strong></button>
+        <details class="audio-advanced">
+          <summary>BEAT FINE-TUNING</summary>
+          <div class="speed-heading audio-sens"><span>BEAT SENSITIVITY</span><strong id="sensitivityLabel">MEDIUM</strong>
+          </div>
+          <input id="sensitivityRange" type="range" min="1" max="5" value="3" step="1"
+            aria-label="Beat detection sensitivity" />
+        </details>
       </div>
 
-      <footer class="hint-row"><span id="hintPrimary">CLICK ANYWHERE TO CHANGE COLOR</span><span>↑ ↓ SPEED</span>
-      </footer>
+      <footer class="hint-row"><span id="hintPrimary">CLICK ANYWHERE TO CHANGE COLOR</span></footer>
     </section>
 
     <div class="center-prompt" id="centerPrompt"><span class="prompt-dot"></span><span>CLICK TO SHIFT</span></div>

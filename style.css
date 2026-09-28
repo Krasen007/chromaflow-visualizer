@@ -437,10 +437,9 @@ button {
 .speed-heading,
 .range-labels,
 .hint-row,
-.shortcut,
 .color-meta,
 .effects-heading,
-.effects-note {
+.audio-advanced summary {
     font-family: 'DM Mono', monospace;
     letter-spacing: .10em;
 }
@@ -478,6 +477,14 @@ h1 {
     border-radius: 50%;
     background: #a3ff12;
     box-shadow: 0 0 10px #a3ff12;
+}
+
+.hud-close {
+    flex: 0 0 32px;
+    width: 32px;
+    min-height: 32px;
+    margin-left: 2px;
+    font-size: 20px;
 }
 
 .readout {
@@ -555,12 +562,6 @@ h1 {
     background: #fff;
     font-size: 11px;
     font-weight: 700;
-}
-
-.shortcut {
-    margin-left: auto;
-    color: rgba(255, 255, 255, .48);
-    font-size: 9px;
 }
 
 .icon-control {
@@ -726,12 +727,6 @@ input[type=range]::-moz-range-thumb {
     color: #a3ff12;
 }
 
-.effects-note {
-    margin: 9px 0 0;
-    color: rgba(255, 255, 255, .30);
-    font-size: 7px;
-}
-
 .hint-row {
     display: flex;
     justify-content: space-between;
@@ -882,8 +877,50 @@ input[type=range]::-moz-range-thumb {
     letter-spacing: .08em;
 }
 
+/* Beat sensitivity is already right by default (MEDIUM), so it waits inside a collapsed
+   disclosure instead of taking a permanent row in an already crowded panel. */
+.audio-advanced {
+    margin-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, .10);
+}
+
+.audio-advanced summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0 2px;
+    color: rgba(255, 255, 255, .46);
+    font-size: 9px;
+    list-style: none;
+    cursor: pointer;
+    transition: color .2s;
+}
+
+.audio-advanced summary::-webkit-details-marker {
+    display: none;
+}
+
+.audio-advanced summary::after {
+    content: '+';
+    color: rgba(255, 255, 255, .46);
+    font-size: 11px;
+}
+
+.audio-advanced summary:hover,
+.audio-advanced summary:focus-visible {
+    color: #fff;
+}
+
+.audio-advanced[open] summary {
+    color: rgba(255, 255, 255, .72);
+}
+
+.audio-advanced[open] summary::after {
+    content: '\2212';
+}
+
 .audio-sens {
-    margin-top: 16px;
+    margin-top: 14px;
 }
 
 .fft-toggle {
@@ -1077,10 +1114,6 @@ input[type=range]::-moz-range-thumb {
         font-size: 10px;
     }
 
-    .effects-note {
-        font-size: 6px;
-    }
-
     .menu-tab {
         top: auto;
         bottom: 25px;
@@ -1106,6 +1139,7 @@ input[type=range]::-moz-range-thumb {
     .menu-tab,
     .mic-control,
     .fft-toggle,
+    .audio-advanced summary,
     .spectrum-canvas,
     .beat-layer {
         transition: none;
@@ -1119,6 +1153,11 @@ input[type=range]::-moz-range-thumb {
     .mic-icon,
     .live-pill i {
         animation-play-state: paused !important;
+    }
+
+    .orbit-orb,
+    .moving-shape {
+        scale: 1;
     }
 
     .beat-ripple,

@@ -1,7 +1,7 @@
 # Design Document — Chroma Flow Visualizer
 
 **Current state of the app: what it does and how it does it.**
-Based on the working tree at commit `264b35d` + uncommitted changes, 2026-09-28.
+Based on the working tree after the 2026-09-28 taste pass (post `51f7cdd`).
 
 ---
 
@@ -21,7 +21,7 @@ A glass control panel (HUD) exposes all settings, then hides itself so the visua
 | Type | Static single-page app, no build step |
 | Stack | Plain HTML + CSS + ES modules — zero dependencies, no framework, no bundler |
 | Entry point | `index.html` → `main.js` (`type="module"`) → imports `audio.js` |
-| Total size | ~1,980 lines across 4 source files |
+| Total size | ~2,060 lines across 4 source files |
 | Persistence | None — all state is in-memory and resets on reload (deliberate) |
 | Hosting | GitHub Pages (relative asset paths); local dev via Five Server (HTTPS :5500) |
 | Required APIs | CSS custom properties, `backdrop-filter`, `mix-blend-mode`, `100svh`, Canvas 2D, Web Audio, `getUserMedia` (mic needs HTTPS or localhost) |
@@ -76,7 +76,7 @@ Clicking anywhere (except on controls) jumps to a new random color immediately. 
 
 ### 4.2 Reactive mode (microphone owns the color)
 
-While listening, the interval timer is a no-op (`applyColor` early-returns) and every animation frame the background hue *chases* an audio-derived target:
+While listening, the ambient interval is **not scheduled at all** (`schedule()` skips it while `audio.running`), and every animation frame the background hue *chases* an audio-derived target:
 
 - **Target hue** = `(spectralCentroid × 460 + hueBias + bass × 24) mod 360` — bright sound ⇒ higher hue; bass nudges the hue; `hueBias` is a random offset re-rolled on each click ("CLICK TO SHIFT") so the user can re-key the palette.
 - **Easing:** hue takes the shortest path around the wheel, exponentially: `hue += Δ × (1 − e^(−dt × rate))`, where `rate = 0.6 + (flowSpeed − 1) × 0.85` — so **FLOW SPEED also controls how fast color chases the audio**.
@@ -108,22 +108,15 @@ Each effect is a set of pre-built DOM elements revealed by a class on `#visualiz
 
 ## 6. The control surface (HUD)
 
-The HUD is a fixed glass panel on the left (bottom sheet under 600 px) with these sections, top to bottom: brand row + LIVE pill → live color readout (hex / RGB / frame) → Pause + Fullscreen buttons → **Audio input** block (mic toggle, status, error slot, level meter, BPM/BEATS, sensitivity slider, FFT toggle) → Flow speed slider → Effects grid + MIX ALL → Motion speed slider → keyboard hints.
+The HUD is a fixed glass panel on the left (bottom sheet under 600 px) with these sections, top to bottom: brand row + LIVE pill + close button → live color readout (hex / RGB / frame) → Pause + Fullscreen buttons → Flow speed slider → Motion speed slider → Effects grid + MIX ALL → **Audio input** block (mic toggle, status, error slot, level meter, BPM/BEATS, FFT toggle, plus a collapsed **BEAT FINE-TUNING** disclosure holding the sensitivity slider).
 
-**Auto-hide behavior:** any pointer move, click, touch, or key press calls `showMenu()`; after **2.2 s** with no activity (while playing) the panel slides out and the **MENU tab** stays on the left edge to recall it. Pausing pins it open. This is the app's core interaction principle: controls appear when wanted, disappear when not.
+**Panel budget:** the order is a taste decision, not history. Everything that matters in a default ambient session — readout, pause, the two speed axes, effects — sits above the fold on a phone; the opt-in audio block sits below it. The one control whose default is already right (beat sensitivity, `MEDIUM`) lives inside a native `<details>` disclosure rather than a permanent row, and the redundant "multiple effects can run together" note was deleted because the grid already shows that state. The rule the panel is held to: no new control without removing or hiding one.
 
-**Keyboard map:**
+**Panel visibility:** the panel stays open until its close button is activated. The **MENU tab** remains at the left edge while it is closed and reopens it. The interface has no app-specific keyboard shortcuts; controls are operated by touch or mouse.
 
-| Key | Action |
-|---|---|
-| `Space` | Pause / resume color flow |
-| `↑` / `↓` | Flow speed up / down (hint label says "SPEED") |
-| `F` | Toggle fullscreen |
-| `M` | Start / stop microphone |
+**Click behavior:** one delegated guard decides ownership — the root handler returns early when `event.target.closest('button, input, summary, a[href]')` matches. Individual handlers never call `stopPropagation()`: one guard, not twelve. Every other click re-keys the color (ambient mode: new random color; reactive mode: re-roll `hueBias`).
 
-**Click behavior:** clicks that land on `button`/`input` are ignored by the canvas handler; every other click re-keys the color (ambient mode: new random color; reactive mode: re-roll `hueBias`).
-
-**Fullscreen** uses the Fullscreen API and swaps the icon (`⛶` ↔ `⤢`); all buttons carry `aria-pressed` and outcome-naming labels.
+**Fullscreen** uses the Fullscreen API and swaps the icon (`⛶` ↔ `⤢`); controls carry accessible labels describing their actions.
 
 ## 7. The audio pipeline
 
@@ -150,12 +143,12 @@ Once per `requestAnimationFrame`, `analyse()` returns one snapshot object:
 
 ### 7.3 Beat detection
 
-Onset detection runs on the bass band against an **adaptive threshold**:
+Onset detection independently tracks bass, mid, and treble against per-band **adaptive thresholds**, so a transient in any of them can trigger a beat:
 
-- A 48-frame (~0.8 s) ring buffer of bass energy; threshold = `running average × sensitivity multiplier`, floored at 0.035 (silence gate).
+- A 48-frame (~0.8 s) ring buffer for each band; threshold = `running average × sensitivity multiplier`, floored at 0.035 (silence gate).
 - Conditions: above threshold **and** rising (> previous frame × 1.02) **and** ≥ 0.16 s since last beat (caps at ~375 BPM) **and** 16-frame warm-up elapsed.
-- Sensitivity is a 5-step slider (default **3 = MEDIUM**): multipliers `1.85 / 1.58 / 1.36 / 1.18 / 1.05`, labels CALM → MAX.
-- **BPM:** the last 10 beat intervals in the 0.28–1.30 s window are averaged (≥3 required); `BPM = 60 / mean`, accepted only within 55–200, otherwise shown as "BPM —".
+- Sensitivity is a 5-step slider (default **3 = MEDIUM**): multipliers `1.85 / 1.58 / 1.36 / 1.18 / 1.05`, labels CALM → MAX. It sits behind the **BEAT FINE-TUNING** disclosure because MEDIUM is already tuned for a typical room — re-tuning is the exception, so it is not a permanent row in the panel.
+- **BPM:** the last 10 beat intervals in the 0.28–1.30 s window are averaged (≥3 required); `BPM = 60 / mean`, accepted only within 55–200. A beat gap over 1.30 s clears the estimate and interval history, including while waiting for the next beat.
 
 ---
 
@@ -216,7 +209,7 @@ All state lives in module-level variables of `main.js` plus fields on the single
 
 ## 12. Error handling (mic)
 
-Five mapped failure modes with actionable copy shown inline and announced via `role="status"`: insecure context, permission blocked, no device, device busy, overconstrained. On any failure the engine is stopped, the button re-enabled (`finally`), and status returns to OFFLINE. Track `ended` events and `pagehide` also trigger full teardown.
+Five mapped failure modes with actionable copy shown inline and announced via `role="status"`: insecure context, permission blocked, no device, device busy, overconstrained. Every lookup keys on `error.name` — the insecure-context case is a typed `NO-SECURE-CONTEXT` error thrown by `audio.js`, so nothing matches on message text; an unmapped failure falls through to a generic line that quotes the message. On any failure the engine is stopped, the button re-enabled (`finally`), and status returns to OFFLINE. Track `ended` events and `pagehide` also trigger full teardown, which reschedules the ambient interval and repaints immediately instead of waiting for the next tick.
 
 ## 13. Running and deploying
 
@@ -225,10 +218,12 @@ Five mapped failure modes with actionable copy shown inline and announced via `r
 
 ## 14. Known gaps in the current state
 
-1. **README/meta description describe the pre-audio product** — no mention of mic, FFT, BPM, or the `M` key; project structure omits `audio.js`.
-2. **Uncommitted changes:** `index.html`, `style.css` (~1.17k changed lines, largely reformatting) and `.gitignore` (`todo/`) are not yet committed on top of `264b35d`.
-3. **No automated verification** — no tests, linter, or CI; correctness rests on manual testing (accepted tradeoff for a zero-build static page).
-4. Minor: footer hint `↑ ↓ SPEED` only controls flow speed; `main.js` names the `#visualizer` element `canvas` (the real canvas is `spectrumCanvas`).
+1. **No automated verification** — no tests, linter, or CI. Correctness rests on manual testing plus throwaway Node checks of `audio.js`, which is importable precisely because it is DOM-free. Accepted tradeoff for a zero-build static page.
+2. **Sensitivity is per-session** — a reload returns it to MEDIUM along with everything else. Deliberate: persistence is the first brick of a settings system this product does not need.
+3. **Motion speed has no keyboard route** — decided in §6, not forgotten. Revisit only if the slider proves awkward on touch.
+4. **Beat detection is bass-only onset detection** — it locks onto drums, not harmony, and quiet or bass-light material leaves `BPM —` instead of guessing. That honesty is the feature.
+
+Closed by the 2026-09-28 taste pass: README and `<meta description>` now describe the real product and the file map lists `audio.js`; the formatting pass shipped as its own commit (`51f7cdd`); the redundant effects note left the panel and beat sensitivity moved behind a disclosure; the `↑ ↓` hint reads FLOW; the click guard exists once instead of twelve times; `#visualizer` is `root` in JS and the root hue field is `baseHue`; the ambient interval is unscheduled while the mic runs and resumes immediately on stop; the insecure-context error is typed and matched by `name`; `todo/` and the taste analysis are gitignored.
 
 *Companion analysis: `reports/codebase-taste-analysis.md`.*
 
