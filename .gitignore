@@ -3,6 +3,7 @@ node_modules/
 dist/
 .vite/
 *.local
+todo/
 
 # Editor / OS cruft
 .DS_Store
@@ -11,3 +12,4 @@ Thumbs.db
 .vscode/
 .cache/server.pem
 fiveserver.config.js
+reports/codebase-taste-analysis.md
