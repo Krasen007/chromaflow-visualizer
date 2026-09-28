@@ -9,7 +9,7 @@ The page cycles the whole background through random HSL colors while optional mo
 Hosted on GitHub Pages — see the repository's **About → Website** link, or visit:
 
 ```
-https://<your-username>.github.io/chromaflow-visualizer/
+https://krasen007.github.io/chromaflow-visualizer/
 ```
 
 ## Features
