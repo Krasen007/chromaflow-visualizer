@@ -22,6 +22,9 @@
         <div class="liquid-blob liquid-one"></div><div class="liquid-blob liquid-two"></div><div class="liquid-blob liquid-three"></div>
         <div class="prism-band prism-one"></div><div class="prism-band prism-two"></div>
       </div>
+      <div class="beat-layer" id="beatLayer" aria-hidden="true"></div>
+      <div class="beat-flash" id="beatFlash" aria-hidden="true"></div>
+      <canvas class="spectrum-canvas" id="spectrumCanvas" aria-hidden="true"></canvas>
       <button class="menu-tab" id="menuTab" type="button" aria-label="Show visualizer controls"><span>MENU</span><i></i></button>
       <section class="hud" aria-label="Visualizer controls">
         <header class="brand-row">
@@ -39,6 +42,19 @@
         <div class="controls">
           <button class="primary-control" id="toggleButton" type="button" aria-label="Pause color cycling" aria-pressed="false"><span class="button-icon" id="toggleIcon">Ⅱ</span><span id="toggleLabel">Pause flow</span><span class="shortcut">SPACE</span></button>
           <button class="icon-control" id="fullscreenButton" type="button" aria-label="Enter fullscreen"><span>⛶</span></button>
+        </div>
+
+        <div class="audio-control">
+          <div class="speed-heading"><span>AUDIO INPUT</span><strong id="micStatus">OFFLINE</strong></div>
+          <button class="mic-control" id="micButton" type="button" aria-pressed="false" aria-label="Enable microphone input"><span class="mic-icon">◉</span><span id="micLabel">Enable microphone</span><span class="shortcut">M</span></button>
+          <p class="mic-error" id="micError" role="status" hidden></p>
+          <div class="audio-meters">
+            <div class="level-meter" aria-hidden="true"><i id="levelFill"></i></div>
+            <div class="audio-readout"><span id="bpmValue">BPM —</span><span id="beatValue">BEATS 0</span></div>
+          </div>
+          <div class="speed-heading audio-sens"><span>BEAT SENSITIVITY</span><strong id="sensitivityLabel">MEDIUM</strong></div>
+          <input id="sensitivityRange" type="range" min="1" max="5" value="3" step="1" aria-label="Beat detection sensitivity" />
+          <button class="fft-toggle" id="spectrumButton" type="button" aria-pressed="true"><span>FFT SPECTRUM</span><strong id="spectrumToggleLabel">ON</strong></button>
         </div>
 
         <div class="speed-control">
@@ -64,7 +80,7 @@
           <div class="range-labels"><span>FLOAT</span><span>TURBO</span></div>
         </div>
 
-        <footer class="hint-row"><span>CLICK ANYWHERE TO CHANGE COLOR</span><span>↑ ↓ SPEED</span></footer>
+        <footer class="hint-row"><span id="hintPrimary">CLICK ANYWHERE TO CHANGE COLOR</span><span>↑ ↓ SPEED</span></footer>
       </section>
 
       <div class="center-prompt" id="centerPrompt"><span class="prompt-dot"></span><span>CLICK TO SHIFT</span></div>

@@ -9,3 +9,5 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+.cache/server.pem
+fiveserver.config.js
