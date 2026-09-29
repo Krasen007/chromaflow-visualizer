@@ -9,6 +9,7 @@ dist/
 Thumbs.db
 .idea/
 .vscode/
+.kilo
 .cache/server.pem
 fiveserver.config.js
 
