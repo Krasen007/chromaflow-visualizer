@@ -1,7 +1,7 @@
 # Design Document — Chroma Flow Visualizer
 
 **Current state of the app: what it does and how it does it.**
-Based on the working tree after the 2026-09-28 taste pass (post `51f7cdd`).
+Based on the working tree after the 2026-09-28 taste pass (post `51f7cdd`), updated by the FFT signal-honesty pass (30 Hz input highpass, shared noise floor on the spectrum bars, true axis marks).
 
 ---
 
@@ -21,7 +21,7 @@ A glass control panel (HUD) exposes all settings, then hides itself so the visua
 | Type | Static single-page app, no build step |
 | Stack | Plain HTML + CSS + ES modules — zero dependencies, no framework, no bundler |
 | Entry point | `index.html` → `main.js` (`type="module"`) → imports `audio.js` |
-| Total size | ~2,060 lines across 4 source files |
+| Total size | ~2,120 lines across 4 source files |
 | Persistence | None — all state is in-memory and resets on reload (deliberate) |
 | Hosting | GitHub Pages (relative asset paths); local dev via Five Server (HTTPS :5500) |
 | Required APIs | CSS custom properties, `backdrop-filter`, `mix-blend-mode`, `100svh`, Canvas 2D, Web Audio, `getUserMedia` (mic needs HTTPS or localhost) |
@@ -30,10 +30,10 @@ A glass control panel (HUD) exposes all settings, then hides itself so the visua
 
 | File | Lines | Responsibility |
 |---|---|---|
-| `index.html` | 120 | Layer stack (ambient → effects → beat → spectrum) + HUD markup |
-| `style.css` | 1128 | All visuals: effect keyframes, HUD, audio-reactive rules, responsive, reduced-motion |
-| `main.js` | 501 | Orchestrator: color engine, effect/HUD state, spectrum canvas, beat reactions, mic lifecycle |
-| `audio.js` | 227 | `AudioEngine` class — mic capture → per-frame analysis snapshot. **Never touches the DOM.** |
+| `index.html` | 123 | Layer stack (ambient → effects → beat → spectrum) + HUD markup |
+| `style.css` | 1166 | All visuals: effect keyframes, HUD, audio-reactive rules, responsive, reduced-motion |
+| `main.js` | 554 | Orchestrator: color engine, effect/HUD state, spectrum canvas, beat reactions, mic lifecycle |
+| `audio.js` | 280 | `AudioEngine` class — mic capture → per-frame analysis snapshot. **Never touches the DOM.** |
 
 ## 3. Page structure and layer stack
 
@@ -122,7 +122,7 @@ The HUD is a fixed glass panel on the left (bottom sheet under 600 px) with thes
 
 ### 7.1 Capture (`audio.js`)
 
-`AudioEngine.start()` requests the mic with **echo cancellation, noise suppression, and auto gain all disabled** (raw signal for analysis), builds an `AudioContext` → `AnalyserNode` (FFT 2048, smoothing 0.72) → `MediaStreamAudioSourceNode`, and connects source → analyser **only** — never to `destination`, so the mic is never played back (no feedback loop). Fails with a typed `NO-SECURE-CONTEXT` error when the page isn't on HTTPS/localhost.
+`AudioEngine.start()` requests the mic with **echo cancellation, noise suppression, and auto gain all disabled** (raw signal for analysis), builds an `AudioContext` → `MediaStreamAudioSourceNode` → **30 Hz Butterworth highpass** (`BiquadFilterNode`) → `AnalyserNode` (FFT 2048, smoothing 0.72), and connects source → highpass → analyser **only** — never to `destination`, so the mic is never played back (no feedback loop). The highpass exists because the raw signal carries DC offset and infrasonic rumble, which otherwise leak into the lowest bins as phantom bass energy and inflate the RMS level while the room is silent; a biquad highpass has exactly zero gain at DC and leaves everything ≥ 30 Hz untouched. Fails with a typed `NO-SECURE-CONTEXT` error when the page isn't on HTTPS/localhost.
 
 `stop()` stops every track, disconnects, closes the context, and resets all counters.
 
@@ -133,7 +133,7 @@ Once per `requestAnimationFrame`, `analyse()` returns one snapshot object:
 | Field | Meaning | How it's computed |
 |---|---|---|
 | `level` 0–1 | Loudness | RMS of the time-domain waveform × 2.8, fast attack / slow release |
-| `bass` 0–1 | 20–180 Hz energy | Mean bin magnitude, noise floor lifted: `(avg − 52) / 150`, smoothed |
+| `bass` 0–1 | 20–180 Hz energy | Mean bin magnitude, noise floor lifted: `(avg − 52) / 150` (the shared `normalizeBand` the spectrum bars also use), smoothed |
 | `mid` 0–1 | 180 Hz–2.2 kHz energy | Same |
 | `treble` 0–1 | 2.2–14 kHz energy | Same |
 | `centroid` 0–1 | Spectral brightness | Energy-weighted average bin position |
@@ -183,8 +183,8 @@ Two mechanisms, deliberately split between CSS and JS:
 A full-width strip at the bottom (`height: min(36svh, 320px)`, hidden until the mic runs, toggleable):
 
 - **72 bars** mapped log-spaced across **30 Hz → 16 kHz**, so bass isn't squeezed into pixels.
-- Each bar: averaged bin magnitude → `min(1, avg^0.72 × 1.55)`, drawn mirrored around a center axis in three passes — glow, hue-filled core (accent hue), white cap — plus a **peak-hold marker** decaying at 0.55/s.
-- Axis labels 60 / 1K / 12K drawn in DM Mono; canvas sized at device-pixel-ratio capped to 2, resized via `ResizeObserver`.
+- Each bar: averaged bin magnitude → noise-floor lift `normalizeBand(avg)` = `(avg − 52) / 150` (the same shared floor as the beat-energy bands — `getByteFrequencyData` is linear in dB from −100 to −30, so plain mic self-noise reads ~30–45 bytes and would otherwise paint phantom low-end bars) → `min(1, norm^0.72 × 1.55)`, drawn mirrored around a center axis in three passes — glow, hue-filled core (accent hue), white cap — plus a **peak-hold marker** decaying at 0.55/s.
+- Axis marks 60 / 1K / **16K** drawn in DM Mono at their true log-axis positions (60 Hz ≈ 11 %, 1 kHz ≈ 56 %, right edge = MAX_HZ); the edge label is derived from `MAX_HZ` so the marks and the mapping cannot drift apart again. Canvas sized at device-pixel-ratio capped to 2, resized via `ResizeObserver`.
 
 ## 9. State model
 

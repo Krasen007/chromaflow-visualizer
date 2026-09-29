@@ -16,6 +16,7 @@
  */
 
 const FFT_SIZE = 2048;
+const HIGHPASS_HZ = 30; // DC offset, room rumble, and handling thumps live below this
 const HISTORY_SIZE = 48; // ~0.8 s of per-band energy at 60 fps
 const WARMUP_FRAMES = 16; // let the analyser settle before trusting the first beat
 const MIN_BEAT_INTERVAL = 0.16; // s — caps detection at ~375 BPM
@@ -41,8 +42,12 @@ function namedError(name, message) {
   return error;
 }
 
-/** Maps a raw 0-255 band average to a usable 0-1 energy with the noise floor lifted out. */
-function normalizeBand(average) {
+/**
+ * Maps a raw 0-255 band average to a usable 0-1 energy with the noise floor lifted
+ * out. Shared by the beat-energy bands and the spectrum bars so the strip and the
+ * snapshot agree on what counts as silence.
+ */
+export function normalizeBand(average) {
   return clamp01((average - 52) / 150);
 }
 
@@ -51,6 +56,7 @@ export class AudioEngine {
     this.context = null;
     this.analyser = null;
     this.source = null;
+    this.highpass = null;
     this.stream = null;
     this.frequency = null;
     this.waveform = null;
@@ -97,9 +103,19 @@ export class AudioEngine {
       analyser.smoothingTimeConstant = 0.72;
       const source = context.createMediaStreamSource(stream);
       this.source = source;
+      // Raw capture still carries DC offset and infrasonic rumble, and without a
+      // highpass those read as phantom bass energy and inflate the RMS level while
+      // the room is silent. A gentle Butterworth highpass drops them without touching
+      // anything the strip or the bands can legitimately show (>= 30 Hz).
+      const highpass = context.createBiquadFilter();
+      highpass.type = 'highpass';
+      highpass.frequency.value = HIGHPASS_HZ;
+      highpass.Q.value = 0.707;
+      this.highpass = highpass;
       // Deliberately not connected to `destination`: routing the mic back out to the
       // speakers would build a feedback loop.
-      source.connect(analyser);
+      source.connect(highpass);
+      highpass.connect(analyser);
       if (context.state === 'suspended') await context.resume();
 
       this.frequency = new Uint8Array(analyser.frequencyBinCount);
@@ -120,9 +136,11 @@ export class AudioEngine {
       try { track.stop(); } catch {}
     });
     try { this.source?.disconnect(); } catch {}
+    try { this.highpass?.disconnect(); } catch {}
     const context = this.context;
     this.stream = null;
     this.source = null;
+    this.highpass = null;
     this.analyser = null;
     this.context = null;
     this.frequency = null;

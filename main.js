@@ -1,4 +1,4 @@
-import { AudioEngine, sensitivityNames } from './audio.js';
+import { AudioEngine, normalizeBand, sensitivityNames } from './audio.js';
 
 const root = document.querySelector('#visualizer');
 const colorValue = document.querySelector('#colorValue');
@@ -158,6 +158,12 @@ function buildBarBins() {
   peaks.fill(0);
 }
 
+/* Where a frequency truly sits on the log-spaced bar axis — the mirror of the
+   mapping in buildBarBins(), so axis marks land under the bins they name. */
+function xForHz(hz) {
+  return (Math.log(hz / MIN_HZ) / Math.log(MAX_HZ / MIN_HZ)) * stripWidth;
+}
+
 function resizeSpectrum() {
   const rect = spectrumCanvas.getBoundingClientRect();
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -184,20 +190,26 @@ function drawSpectrum(dt) {
   ctx.font = '8px "DM Mono", monospace';
   ctx.fillStyle = 'rgba(255,255,255,.28)';
   ctx.textBaseline = 'bottom';
-  ctx.textAlign = 'left';
-  ctx.fillText('60', 2, center - 4);
+  // Marks sit at their true log-axis positions (60 Hz ~11%, 1 kHz ~56%), and the
+  // right edge is MAX_HZ — 16 kHz, not the 12 kHz the old label claimed. Deriving
+  // the edge label from MAX_HZ keeps the mapping and the marks from drifting apart.
   ctx.textAlign = 'center';
-  ctx.fillText('1K', stripWidth / 2, center - 4);
+  ctx.fillText('60', xForHz(60), center - 4);
+  ctx.fillText('1K', xForHz(1000), center - 4);
   ctx.textAlign = 'right';
-  ctx.fillText('12K', stripWidth - 2, center - 4);
+  ctx.fillText(`${Math.round(MAX_HZ / 1000)}K`, stripWidth - 2, center - 4);
 
   for (let i = 0; i < BAR_COUNT; i += 1) {
     const from = barBins[i];
     const to = Math.max(from + 1, barBins[i + 1]);
     let sum = 0;
     for (let bin = from; bin < to; bin += 1) sum += data[bin];
-    const average = sum / (to - from) / 255;
-    const value = Math.min(1, average ** 0.72 * 1.55);
+    const average = sum / (to - from); // raw 0-255 byte average
+    // Same 52-byte noise floor as the beat-energy bands: `getByteFrequencyData`
+    // is linear in dB from -100 to -30, so plain mic self-noise reads ~30-45 and
+    // the old bare `avg^0.72 x 1.55` curve amplified it into low-end bars that
+    // pumped while the room was silent. Lift the floor first, then expand.
+    const value = Math.min(1, normalizeBand(average) ** 0.72 * 1.55);
     const height = Math.max(1, value * reach);
     const x = i * (barWidth + gap);
 

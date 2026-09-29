@@ -17,9 +17,9 @@ https://krasen007.github.io/chromaflow-visualizer/
 ## Features
 
 - **Random color cycling** — each frame picks a new hue with randomized saturation and lightness, eased with a 120ms background transition.
-- **Microphone mode** — Web Audio analysis turns the live signal into loudness, bass/mid/treble energy, and spectral brightness; those drive the background color and scale every effect layer in real time. Strictly opt-in: nothing is requested until you ask for it.
 - **Beat detection and BPM** — adaptive onset detection across bass, mid, and treble feeds a running BPM estimate, expanding beat ripples, a beat flash, and a re-roll of the orbiting shapes.
-- **FFT spectrum strip** — 72 log-spaced bars from 30 Hz to 16 kHz with peak-hold caps, drawn along the bottom of the screen. Only visible while the mic runs, and toggleable.
+- **Microphone mode** — Web Audio analysis turns the live signal into loudness, bass/mid/treble energy, and spectral brightness; those drive the background color and scale every effect layer in real time. Strictly opt-in: nothing is requested until you ask for it. The raw feed runs through a 30 Hz highpass and every measurement lifts a −85 dB noise floor, so a silent room reads as silence — no phantom bass.
+- **FFT spectrum strip** — 72 log-spaced bars from 30 Hz to 16 kHz with peak-hold caps, drawn along the bottom of the screen with axis marks at their true log positions (60 / 1K / 16K). Only visible while the mic runs, and toggleable.
 - **Four stackable effects** — Orbiting, Color waves, Liquid flow, and Prism shift. They combine freely; run all four at once.
 - **Two independent speed axes** — *Flow speed* controls how often the color changes (while listening, how fast color chases the audio), *Motion speed* controls how fast the effect layers animate. They are deliberately decoupled.
 - **Live readout** — hex value, RGB triplet, frame counter, input level meter, BPM, and beat count.
