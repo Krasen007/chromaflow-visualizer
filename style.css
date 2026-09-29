@@ -39,7 +39,8 @@
 
     #visualizer {
       --color: #8749db;
-      --accent: hsl(95 86% 71%);
+      /* Pre-script fallback. Matches accentHsl() in main.js at the initial hue of 275. */
+      --accent: hsl(95 88% 73%);
       --level: 0;
       --bass: 0;
       --mid: 0;
@@ -736,6 +737,11 @@
 
     .status.error {
       color: #ffb7ad;
+    }
+
+    /* Empty until fullscreen actually fails, so the panel does not reserve a blank line. */
+    .fullscreen-status:empty {
+      display: none;
     }
 
     .level-head {

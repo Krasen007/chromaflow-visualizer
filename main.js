@@ -8,7 +8,7 @@
     const SPEED_STEPS = 20, SPEED_DEFAULT = 15, TIER_STEPS = SPEED_STEPS / 5;
     const flowTierNames = ['CALM', 'EASY', 'MEDIUM', 'FAST', 'RAPID'];
     const motionTierNames = ['FLOAT', 'EASY', 'MEDIUM', 'FAST', 'TURBO'];
-    const state = { paused: false, flow: SPEED_DEFAULT, motion: SPEED_DEFAULT, sensitivity: 3, gain: 1, display: 'bars', effects: new Set(), spectrum: !motionPreference.matches, hue: 275, hueBias: Math.random() * 360, frame: 0, rgb: [135, 73, 219], hex: '#8749DB', mic: 'off', beatCount: 0, bpm: null, lastReactivePaint: 0 };
+    const state = { paused: false, flow: SPEED_DEFAULT, motion: SPEED_DEFAULT, sensitivity: 3, gain: 1, display: 'bars', effects: new Set(), spectrum: !motionPreference.matches, hue: 275, hueBias: Math.random() * 360, frame: 0, rgb: [135, 73, 219], hex: '#8749DB', mic: 'off', lastReactivePaint: 0 };
     const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
     const random = (min, max) => min + Math.random() * (max - min);
     // Maps step 1..SPEED_STEPS onto anchor 0..anchors.length-1, so every step is a distinct value.
@@ -38,7 +38,7 @@
         const cleanup = () => {
           stream?.getTracks().forEach(track => track.stop());
           source?.disconnect(); gainNode?.disconnect(); analyser?.disconnect();
-          if (context) context.close().catch(() => { });
+          if (context) context.close().catch(() => { console.warn('AudioEngine: context.close() rejected during startup cleanup.'); });
         };
         try {
           stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
@@ -76,7 +76,7 @@
         this.source?.disconnect();
         this.gainNode?.disconnect();
         this.analyser?.disconnect();
-        this.context?.close().catch(() => { });
+        this.context?.close().catch(() => { console.warn('AudioEngine: context.close() rejected during teardown.'); });
         this.stream = this.source = this.gainNode = this.analyser = this.context = null;
         this.reset();
       }
@@ -151,12 +151,22 @@
       const channel = n => { const k = (n + h / 30) % 12; return Math.round((l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255); };
       return [channel(0), channel(8), channel(4)];
     }
+    // The accent is the hue complement. The canvas cannot read a CSS custom property, so the DOM and
+    // the 2D context both derive it here rather than each re-spelling the HSL triple.
+    const accentHsl = () => `hsl(${(state.hue + 180) % 360} 88% 73%)`;
+    // The colour the current audio snapshot asks for. Shared by the live reactive loop and the
+    // paused click path so the two cannot drift apart.
+    const reactiveTarget = snapshot => [
+      (snapshot.centroid * 460 + state.hueBias + snapshot.bass * 24) % 360,
+      clamp(58 + snapshot.level * 34, 40, 96),
+      clamp(38 + snapshot.level * 26 + snapshot.bass * 6, 20, 68)
+    ];
     function applyColor(h, s, l) {
       state.hue = (h + 360) % 360;
       state.rgb = hslToRgb(state.hue, s, l);
       state.hex = '#' + state.rgb.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase();
       visualizer.style.setProperty('--color', state.hex);
-      visualizer.style.setProperty('--accent', `hsl(${(state.hue + 180) % 360} 88% 73%)`);
+      visualizer.style.setProperty('--accent', accentHsl());
       state.frame++;
     }
     // The timer tick stays frozen while paused, so the guard lives here and not in the picker.
@@ -168,7 +178,7 @@
       if (state.mic === 'on') {
         state.hueBias = random(0, 360);
         // The reactive loop does not paint while paused, so resolve the new bias straight away.
-        if (state.paused) { const snapshot = latestAudio; if (snapshot) applyColor((snapshot.centroid * 460 + state.hueBias + snapshot.bass * 24) % 360, clamp(58 + snapshot.level * 34, 40, 96), clamp(38 + snapshot.level * 26 + snapshot.bass * 6, 20, 68)); else applyRandomColor(); }
+        if (state.paused) { const snapshot = latestAudio; if (snapshot) applyColor(...reactiveTarget(snapshot)); else applyRandomColor(); }
         updateHud();
       } else {
         applyRandomColor(); updateHud(); lastAmbientHudUpdate = performance.now();
@@ -268,7 +278,7 @@
       const minHz = 30, binHz = snapshot.sampleRate / snapshot.fftSize;
       const maxHz = Math.min(16000, (snapshot.frequency.length - 1) * binHz);
       const bars = 72, slot = (right - left) / bars, heights = [];
-      const color = `hsl(${(state.hue + 180) % 360} 90% 72%)`;
+      const color = accentHsl();
       ctx.strokeStyle = 'rgba(255,255,255,.24)'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(left, baseline); ctx.lineTo(right, baseline); ctx.stroke();
       for (let i = 0; i < bars; i++) {
@@ -316,12 +326,12 @@
         latestAudio = snapshot;
         if (!state.paused) {
           if (!motionPreference.matches || now - state.lastReactivePaint >= 500) {
-            const target = (snapshot.centroid * 460 + state.hueBias + snapshot.bass * 24) % 360;
-            const difference = ((target - state.hue + 540) % 360) - 180;
+            const [targetHue, targetSaturation, targetLightness] = reactiveTarget(snapshot);
+            const difference = ((targetHue - state.hue + 540) % 360) - 180;
             const dt = state.lastReactivePaint ? clamp((now - state.lastReactivePaint) / 1000, .001, .5) : 1 / 60;
             const rate = flowEasingRate();
             const easing = 1 - Math.exp(-rate * dt);
-            applyColor(state.hue + difference * easing, clamp(58 + snapshot.level * 34, 40, 96), clamp(38 + snapshot.level * 26 + snapshot.bass * 6, 20, 68));
+            applyColor(state.hue + difference * easing, targetSaturation, targetLightness);
             state.lastReactivePaint = now;
           }
           visualizer.style.setProperty('--level', snapshot.level);
@@ -379,10 +389,17 @@
     $('#close-menu').addEventListener('click', () => { visualizer.classList.add('menu-hidden'); $('#menu-tab').setAttribute('aria-expanded', 'false'); $('#menu-tab').focus(); });
     $('#menu-tab').addEventListener('click', () => { visualizer.classList.remove('menu-hidden'); $('#menu-tab').setAttribute('aria-expanded', 'true'); $('#close-menu').focus(); });
     function syncFullscreen() { const active = Boolean(document.fullscreenElement); $('#fullscreen-btn').setAttribute('aria-pressed', active); $('#fullscreen-btn').setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen'); $('#fullscreen-label').textContent = active ? 'EXIT FULLSCREEN' : 'FULLSCREEN'; }
-    $('#fullscreen-btn').addEventListener('click', async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await visualizer.requestFullscreen(); } catch { $('#mic-status').textContent = 'Fullscreen is unavailable in this browser.'; } });
+    // Fullscreen reports on its own line; the microphone status belongs to setMicUi and must not
+    // be overwritten by an unrelated failure.
+    function setFullscreenStatus(message = '', error = false) { const status = $('#fullscreen-status'); status.textContent = message; status.classList.toggle('error', error); }
+    $('#fullscreen-btn').addEventListener('click', async () => { setFullscreenStatus(); try { if (document.fullscreenElement) await document.exitFullscreen(); else await visualizer.requestFullscreen(); } catch { setFullscreenStatus('Fullscreen is unavailable in this browser.', true); } });
     document.addEventListener('fullscreenchange', syncFullscreen);
     visualizer.addEventListener('click', event => { if (!event.target.closest('button, input, summary, a[href]')) shiftColor(); });
     document.addEventListener('keydown', event => { if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return; const target = event.target; if (target.closest('button, input, summary, a[href], select, textarea, [contenteditable="true"]') || target.isContentEditable) return; event.preventDefault(); setPause(!state.paused); });
     motionPreference.addEventListener('change', () => { scheduleAmbient(); if (motionPreference.matches) { visualizer.style.setProperty('--beat', 0); $('#beat-layer').replaceChildren(); } state.lastReactivePaint = 0; });
-    window.addEventListener('pagehide', () => { clearInterval(ambientTimer); if (animationFrame) cancelAnimationFrame(animationFrame); audio.stop(); });
+    // A bfcache restore cannot revive the AudioContext, and the browser does not resume the rAF
+    // loop or the ambient interval, so the UI must never outlive the audio layer. pagehide tears
+    // the microphone down through the same path as a user toggle; pageshow re-asserts the timer.
+    window.addEventListener('pagehide', () => teardownMic('Microphone released while the page was hidden.'));
+    window.addEventListener('pageshow', event => { if (!event.persisted) return; if (state.mic !== 'off') teardownMic(); scheduleAmbient(); });
     updateEffects(); syncFlowSpeed(); syncMotionSpeed(); syncSensitivity(); updateSpectrumState(); selectAmbientColor(); scheduleAmbient();
