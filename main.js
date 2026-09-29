@@ -159,9 +159,21 @@
       visualizer.style.setProperty('--accent', `hsl(${(state.hue + 180) % 360} 88% 73%)`);
       state.frame++;
     }
-    function selectAmbientColor() { if (!state.paused && state.mic === 'off') { applyColor(Math.floor(random(0, 360)), random(62, 92), random(42, 62)); const now = performance.now(); if (!lastAmbientHudUpdate || now - lastAmbientHudUpdate >= 100) { updateHud(); lastAmbientHudUpdate = now; } } }
+    // The timer tick stays frozen while paused, so the guard lives here and not in the picker.
+    function applyRandomColor() { applyColor(Math.floor(random(0, 360)), random(62, 92), random(42, 62)); const now = performance.now(); if (!lastAmbientHudUpdate || now - lastAmbientHudUpdate >= 100) { updateHud(); lastAmbientHudUpdate = now; } }
+    function selectAmbientColor() { if (!state.paused && state.mic === 'off') applyRandomColor(); }
     function scheduleAmbient() { clearInterval(ambientTimer); ambientTimer = null; if (state.mic === 'off' && !state.paused) ambientTimer = setInterval(selectAmbientColor, Math.max(flowIntervalFor(state.flow), motionPreference.matches ? 1100 : 0)); }
-    function shiftColor() { if (state.paused) return; if (state.mic === 'on') state.hueBias = random(0, 360); else { selectAmbientColor(); updateHud(); lastAmbientHudUpdate = performance.now(); } }
+    // A click is an explicit user action, so it re-keys the colour even while paused.
+    function shiftColor() {
+      if (state.mic === 'on') {
+        state.hueBias = random(0, 360);
+        // The reactive loop does not paint while paused, so resolve the new bias straight away.
+        if (state.paused) { const snapshot = latestAudio; if (snapshot) applyColor((snapshot.centroid * 460 + state.hueBias + snapshot.bass * 24) % 360, clamp(58 + snapshot.level * 34, 40, 96), clamp(38 + snapshot.level * 26 + snapshot.bass * 6, 20, 68)); else applyRandomColor(); }
+        updateHud();
+      } else {
+        applyRandomColor(); updateHud(); lastAmbientHudUpdate = performance.now();
+      }
+    }
     function updateHud() {
       $('#hex-value').textContent = state.hex;
       $('#rgb-value').textContent = `RGB ${state.rgb.join(', ')}`;

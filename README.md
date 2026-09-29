@@ -1,6 +1,6 @@
 # Chroma Flow Visualizer
 
-A full-screen color visualizer with two ways to make color move. Pure static HTML, CSS, and JavaScript — no build step, no framework, no bundled dependencies. (The page pulls Tailwind's preflight build and the Inter webfont from a CDN, and falls back cleanly if either request is blocked.)
+A full-screen color visualizer with two ways to make color move. Pure static HTML, CSS, and JavaScript — no build step, no framework, no bundled dependencies, and no CSS framework. (The page's only third-party request is the Inter webfont; if it is blocked the page falls back to the system sans-serif.)
 
 **Ambient mode** is the default: the background cycles through random HSL colors while optional motion layers (orbiting shapes, color waves, liquid blobs, prism bands) animate on top. **Reactive mode** is opt-in — enable the microphone with its button, allow access, and the sound takes over. Loudness and spectral brightness drive the background, beats spawn ripples and re-roll the shapes, and a 72-sample FFT spectrum strip runs along the bottom of the screen.
 
@@ -37,7 +37,7 @@ https://krasen007.github.io/chromaflow-visualizer/
 |---|---|
 | **Click anywhere** | Jump to a new random color — while listening, re-keys the palette instead |
 | **Space** | Pause or resume, as long as focus is not inside a control |
-| **Pause flow** button | Freeze or resume color cycling |
+| **Pause flow** button | Freeze or resume the automatic color cycling — the visuals are never dimmed, and you can still click to re-key the color while paused |
 | **Fullscreen** button | Toggle fullscreen |
 | **Flow speed** slider | Color change rate: CALM → RAPID (20 steps, 1100 ms down to 75 ms) |
 | **Motion speed** slider | Effect animation rate: FLOAT → TURBO (20 steps, 30 s down to 3.2 s per orbit) |

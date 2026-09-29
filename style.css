@@ -64,8 +64,7 @@
     .effect-layer,
     .beat-layer,
     .flash,
-    #spectrum,
-    .shade {
+    #spectrum {
       position: absolute;
       inset: 0;
       pointer-events: none;
@@ -310,17 +309,6 @@
 
     .spectrum-visible.mic-running #spectrum {
       opacity: .92;
-    }
-
-    .shade {
-      z-index: 6;
-      background: #080b20;
-      opacity: 0;
-      transition: opacity .25s;
-    }
-
-    body.paused .shade {
-      opacity: .37;
     }
 
     .centerpiece {
