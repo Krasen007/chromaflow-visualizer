@@ -262,6 +262,9 @@
         animationFrame = requestAnimationFrame(renderAudio);
       } catch (error) {
         if (state.mic !== 'pending') return;
+        // An unmapped error name means a real fault we did not anticipate (for example a TypeError
+        // from a bug in this file), not a device problem. Log it so it is not swallowed silently.
+        if (!errorMessages[error.name]) console.warn('Microphone start failed with an unmapped error:', error.name, error);
         setMicUi('off', errorMessages[error.name] || 'Could not start the microphone. Check your device and try again.', true);
         if (!state.paused) { selectAmbientColor(); scheduleAmbient(); }
       }
@@ -273,6 +276,25 @@
       ripple.className = 'ripple'; ripple.style.left = `${random(37, 88)}%`; ripple.style.top = `${random(14, 82)}%`;
       layer.appendChild(ripple);
       ripple.addEventListener('animationend', () => ripple.remove(), { once: true });
+    }
+    // Per-bar canvas shadowBlur is the most expensive operation in this file: it forces a blur pass
+    // for each of the 72 bars on every frame. A single pre-rendered radial sprite drawn with
+    // drawImage is visually equivalent and costs one scaled blit per bar instead of a blur.
+    const glowSprite = document.createElement('canvas');
+    glowSprite.width = glowSprite.height = 64;
+    const glowContext = glowSprite.getContext('2d');
+    let glowColor = '';
+    function glowFor(color) {
+      if (glowColor === color) return glowSprite;
+      glowColor = color;
+      const gradient = glowContext.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(.5, color);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      glowContext.clearRect(0, 0, 64, 64);
+      glowContext.fillStyle = gradient;
+      glowContext.fillRect(0, 0, 64, 64);
+      return glowSprite;
     }
     function drawSpectrum(snapshot) {
       if (!state.spectrum || !canvasWidth || !canvasHeight) return;
@@ -294,9 +316,11 @@
           peaks[i] = Math.max(height, peaks[i] - 1.2);
           const x = left + i * slot + 1;
           const barWidth = Math.max(1, slot - 2);
-          ctx.fillStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 13; ctx.globalAlpha = .84;
+          const glow = glowFor(color), pad = 13;
+          ctx.globalAlpha = .5; ctx.drawImage(glow, x - pad, baseline - height - pad, barWidth + pad * 2, height + pad * 2);
+          ctx.globalAlpha = .84; ctx.fillStyle = color;
           ctx.fillRect(x, baseline - height, barWidth, height);
-          ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.globalAlpha = .9;
+          ctx.fillStyle = '#fff'; ctx.globalAlpha = .9;
           ctx.fillRect(x, baseline - height, barWidth, 2);
           ctx.globalAlpha = .55; ctx.fillRect(x, baseline - peaks[i] - 5, barWidth, 1);
         }
@@ -391,9 +415,49 @@
     $('#mic-btn').addEventListener('click', toggleMic);
     $('#close-menu').addEventListener('click', () => { visualizer.classList.add('menu-hidden'); $('#menu-tab').setAttribute('aria-expanded', 'false'); $('#menu-tab').focus(); });
     $('#menu-tab').addEventListener('click', () => { visualizer.classList.remove('menu-hidden'); $('#menu-tab').setAttribute('aria-expanded', 'true'); $('#close-menu').focus(); });
+    // The Fullscreen API is unavailable on iOS Safari and in some embedded webviews. Report that
+    // up front instead of letting the button look functional and failing only when it is pressed.
+    const fullscreenSupported = Boolean(document.fullscreenEnabled && visualizer.requestFullscreen);
+    function syncFullscreenSupport() {
+      if (fullscreenSupported) return;
+      const button = $('#fullscreen-btn');
+      button.disabled = true;
+      button.setAttribute('aria-label', 'Fullscreen is unavailable in this browser');
+      button.title = 'Fullscreen is unavailable in this browser';
+      setFullscreenStatus('Fullscreen is unavailable in this browser.', true);
+    }
     function syncFullscreen() { const active = Boolean(document.fullscreenElement); $('#fullscreen-btn').setAttribute('aria-pressed', active); $('#fullscreen-btn').setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen'); $('#fullscreen-label').textContent = active ? 'EXIT FULLSCREEN' : 'FULLSCREEN'; }
     // Fullscreen reports on its own line; the microphone status belongs to setMicUi and must not
     // be overwritten by an unrelated failure.
+    // Restored in v2 after being lost in the rewrite. The screen wake lock keeps the display on while
+    // the visualizer is visible, which is what a long-running fullscreen color piece needs. The browser
+    // drops the lock on its own whenever the page is hidden, so it must be re-acquired on return.
+    // Unsupported or denied locks fail quietly and the visualizer stays fully usable.
+    let screenWakeLock = null, wakeLockPending = false;
+    async function keepScreenAwake() {
+      if (screenWakeLock || wakeLockPending || document.visibilityState !== 'visible' || !navigator.wakeLock?.request) return;
+      wakeLockPending = true;
+      try {
+        const lock = await navigator.wakeLock.request('screen');
+        // The tab may have been hidden while the request was still in flight.
+        if (document.visibilityState !== 'visible') { await lock.release(); return; }
+        screenWakeLock = lock;
+        lock.addEventListener('release', () => { if (screenWakeLock === lock) screenWakeLock = null; });
+      } catch (error) {
+        console.warn('Screen wake lock unavailable:', error.name || error);
+      } finally {
+        wakeLockPending = false;
+      }
+    }
+    async function releaseScreenWakeLock() {
+      const lock = screenWakeLock;
+      screenWakeLock = null;
+      try { await lock?.release(); } catch {}
+    }
+    window.addEventListener('pagehide', releaseScreenWakeLock);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') keepScreenAwake(); else releaseScreenWakeLock();
+    });
     function setFullscreenStatus(message = '', error = false) { const status = $('#fullscreen-status'); status.textContent = message; status.classList.toggle('error', error); }
     $('#fullscreen-btn').addEventListener('click', async () => { setFullscreenStatus(); try { if (document.fullscreenElement) await document.exitFullscreen(); else await visualizer.requestFullscreen(); } catch { setFullscreenStatus('Fullscreen is unavailable in this browser.', true); } });
     document.addEventListener('fullscreenchange', syncFullscreen);
@@ -407,4 +471,4 @@
     // the microphone down through the same path as a user toggle; pageshow re-asserts the timer.
     window.addEventListener('pagehide', () => teardownMic('Microphone released while the page was hidden.'));
     window.addEventListener('pageshow', event => { if (!event.persisted) return; if (state.mic !== 'off') teardownMic(); scheduleAmbient(); });
-    updateEffects(); syncFlowSpeed(); syncMotionSpeed(); syncSensitivity(); updateSpectrumState(); selectAmbientColor(); scheduleAmbient();
+    updateEffects(); syncFlowSpeed(); syncMotionSpeed(); syncSensitivity(); updateSpectrumState(); syncFullscreenSupport(); selectAmbientColor(); scheduleAmbient(); keepScreenAwake();

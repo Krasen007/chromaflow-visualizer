@@ -431,7 +431,7 @@
 
     .brand-sub {
       margin: 7px 0 0;
-      color: rgba(255, 255, 255, .45);
+      color: rgba(255, 255, 255, .64);
       font-size: 9px;
       letter-spacing: .24em;
       font-weight: 700;
@@ -511,7 +511,7 @@
     }
 
     .micro-label {
-      color: rgba(255, 255, 255, .46);
+      color: rgba(255, 255, 255, .62);
       font-size: 9px;
       font-weight: 800;
       text-transform: uppercase;
@@ -644,8 +644,8 @@
       display: flex;
       justify-content: space-between;
       margin-top: 6px;
-      color: rgba(255, 255, 255, .33);
-      font-size: 8px;
+      color: rgba(255, 255, 255, .56);
+      font-size: 9px;
       font-weight: 750;
       letter-spacing: .13em;
     }
