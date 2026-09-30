@@ -1,14 +1,15 @@
  const $ = (selector) => document.querySelector(selector);
     const visualizer = $('#visualizer');
     const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
-    const flowIntervals = [1100, 640, 360, 180, 75];
     const motionDurations = { orbit: [30, 20, 13, 7, 3.2], waves: [14, 9, 6, 3.6, 1.7], liquid: [28, 19, 12, 7, 3.6], prism: [22, 15, 10, 5.5, 2.8] };
-    // Both speed axes are 20-step sliders that interpolate between the five anchor values above,
+    // Flow is an absolute beats-per-minute control, 60-240, so that 120 lands on the middle of the
+    // range. A 20-step tier scale cannot express that: step 15 of 20 already sits ~94% of the way up.
+    // Motion speed keeps the tier scale, interpolating between the five anchors above
     // logarithmically so the perceived change per step stays even across the whole range.
+    const FLOW_BPM_MIN = 60, FLOW_BPM_MAX = 240, FLOW_BPM_DEFAULT = 120;
     const SPEED_STEPS = 20, SPEED_DEFAULT = 15, TIER_STEPS = SPEED_STEPS / 5;
-    const flowTierNames = ['CALM', 'EASY', 'MEDIUM', 'FAST', 'RAPID'];
     const motionTierNames = ['FLOAT', 'EASY', 'MEDIUM', 'FAST', 'TURBO'];
-    const state = { paused: false, flow: SPEED_DEFAULT, motion: SPEED_DEFAULT, sensitivity: 3, gain: 1, display: 'bars', effects: new Set(), spectrum: !motionPreference.matches, hue: 275, hueBias: Math.random() * 360, frame: 0, rgb: [135, 73, 219], hex: '#8749DB', mic: 'off', lastReactivePaint: 0 };
+    const state = { paused: false, flow: FLOW_BPM_DEFAULT, motion: SPEED_DEFAULT, sensitivity: 3, gain: 1, display: 'bars', effects: new Set(), spectrum: !motionPreference.matches, hue: 275, hueBias: Math.random() * 360, frame: 0, rgb: [135, 73, 219], hex: '#8749DB', mic: 'off', lastReactivePaint: 0 };
     const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
     const random = (min, max) => min + Math.random() * (max - min);
     // Maps step 1..SPEED_STEPS onto anchor 0..anchors.length-1, so every step is a distinct value.
@@ -18,12 +19,14 @@
       const low = Math.floor(position), high = Math.min(low + 1, segments);
       return anchors[low] * Math.pow(anchors[high] / anchors[low], position - low);
     };
-    const flowIntervalFor = step => Math.round(interpolate(flowIntervals, step));
+    // One color per beat, so a BPM reading maps straight onto the ambient timer period.
+    const flowIntervalFor = bpm => Math.round(60000 / clamp(bpm, FLOW_BPM_MIN, FLOW_BPM_MAX));
     const effectDurationFor = (effect, step) => interpolate(motionDurations[effect], step);
     const tierName = (names, step) => names[clamp(Math.floor((step - 1) / TIER_STEPS), 0, names.length - 1)];
     const speedFill = step => (step - 1) / (SPEED_STEPS - 1) * 100;
-    // Reactive colour easing: 0.6/s at the calmest step up to ~4.05/s at the most rapid one.
-    const flowEasingRate = () => .6 + (state.flow - 1) / (SPEED_STEPS - 1) * 3.45;
+    const flowFill = bpm => (clamp(bpm, FLOW_BPM_MIN, FLOW_BPM_MAX) - FLOW_BPM_MIN) / (FLOW_BPM_MAX - FLOW_BPM_MIN) * 100;
+    // Reactive colour easing: 0.6/s at 60 BPM up to ~4.05/s at 240 BPM.
+    const flowEasingRate = () => .6 + (state.flow - FLOW_BPM_MIN) / (FLOW_BPM_MAX - FLOW_BPM_MIN) * 3.45;
 
     // Analysis is self-contained: it never accesses the DOM or routes input to speakers.
     class AudioEngine {
@@ -357,9 +360,9 @@
     function syncFlowSpeed() {
       const input = $('#flow-speed'), interval = flowIntervalFor(state.flow);
       input.value = state.flow;
-      input.style.setProperty('--fill', `${speedFill(state.flow)}%`);
-      input.setAttribute('aria-valuetext', `${tierName(flowTierNames, state.flow)}, one color every ${interval >= 1000 ? `${(interval / 1000).toFixed(2)} seconds` : `${interval} milliseconds`}`);
-      $('#flow-label').textContent = `${state.flow} · ${tierName(flowTierNames, state.flow)}`;
+      input.style.setProperty('--fill', `${flowFill(state.flow)}%`);
+      input.setAttribute('aria-valuetext', `${state.flow} beats per minute, one color every ${interval >= 1000 ? `${(interval / 1000).toFixed(2)} seconds` : `${interval} milliseconds`}`);
+      $('#flow-label').textContent = `${state.flow} BPM`;
     }
     function syncMotionSpeed() {
       const input = $('#motion-speed'), orbit = effectDurationFor('orbit', state.motion);
@@ -369,7 +372,7 @@
       $('#motion-label').textContent = `${state.motion} · ${tierName(motionTierNames, state.motion)}`;
       updateMotionSpeed();
     }
-    $('#flow-speed').addEventListener('input', event => { state.flow = Number(event.target.value); syncFlowSpeed(); scheduleAmbient(); });
+    $('#flow-speed').addEventListener('input', event => { state.flow = clamp(Number(event.target.value), FLOW_BPM_MIN, FLOW_BPM_MAX); syncFlowSpeed(); scheduleAmbient(); });
     $('#motion-speed').addEventListener('input', event => { state.motion = Number(event.target.value); syncMotionSpeed(); });
     const sensitivityTierNames = ['CALM', 'LOW', 'MEDIUM', 'HIGH', 'MAX'];
     function syncSensitivity() {
@@ -394,7 +397,9 @@
     function setFullscreenStatus(message = '', error = false) { const status = $('#fullscreen-status'); status.textContent = message; status.classList.toggle('error', error); }
     $('#fullscreen-btn').addEventListener('click', async () => { setFullscreenStatus(); try { if (document.fullscreenElement) await document.exitFullscreen(); else await visualizer.requestFullscreen(); } catch { setFullscreenStatus('Fullscreen is unavailable in this browser.', true); } });
     document.addEventListener('fullscreenchange', syncFullscreen);
-    visualizer.addEventListener('click', event => { if (!event.target.closest('button, input, summary, a[href]')) shiftColor(); });
+    // Clicks anywhere inside the settings panel are inert, so the hex and RGB readouts stay
+    // selectable and copyable instead of re-keying the color underneath the user.
+    visualizer.addEventListener('click', event => { if (!event.target.closest('.hud, button, input, summary, a[href]')) shiftColor(); });
     document.addEventListener('keydown', event => { if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return; const target = event.target; if (target.closest('button, input, summary, a[href], select, textarea, [contenteditable="true"]') || target.isContentEditable) return; event.preventDefault(); setPause(!state.paused); });
     motionPreference.addEventListener('change', () => { scheduleAmbient(); if (motionPreference.matches) { visualizer.style.setProperty('--beat', 0); $('#beat-layer').replaceChildren(); } state.lastReactivePaint = 0; });
     // A bfcache restore cannot revive the AudioContext, and the browser does not resume the rAF

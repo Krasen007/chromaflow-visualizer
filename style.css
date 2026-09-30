@@ -127,7 +127,6 @@
     .effect-waves .wave,
     .effect-liquid .liquid,
     .effect-prism .prism {
-      opacity: 1;
       visibility: visible;
     }
 
@@ -141,7 +140,7 @@
       filter: blur(13px);
       mix-blend-mode: screen;
       animation: orbit var(--orbit-duration) ease-in-out infinite alternate;
-      opacity: .45 !important;
+      opacity: .45;
     }
 
     .orbit.one {
@@ -160,7 +159,7 @@
       --ty: 16vh;
       animation-delay: -4s;
       background: #fff;
-      opacity: .24 !important;
+      opacity: .24;
     }
 
     .orbit.three {
@@ -171,7 +170,7 @@
       --tx: 37vw;
       --ty: -53vh;
       animation-delay: -2s;
-      opacity: .32 !important;
+      opacity: .32;
     }
 
     .orbit.shape {
@@ -185,7 +184,7 @@
       border-radius: 12px;
       --tx: var(--shape-tx, -20vw);
       --ty: var(--shape-ty, 25vh);
-      opacity: .38 !important;
+      opacity: .38;
       transition: left .8s, top .8s;
     }
 
@@ -216,6 +215,7 @@
       border-radius: 50%;
       box-shadow: 0 0 50px inset rgba(255, 255, 255, .08), 0 0 45px rgba(255, 255, 255, .12);
       animation: waves var(--wave-duration) ease-out infinite;
+      opacity: 1;
     }
 
     .wave:nth-child(2) {
@@ -235,7 +235,7 @@
       filter: blur(calc(48px + var(--level) * 55px));
       mix-blend-mode: soft-light;
       animation: liquid var(--liquid-duration) ease-in-out infinite alternate;
-      opacity: .62 !important;
+      opacity: .62;
     }
 
     .liquid.one {
@@ -248,7 +248,7 @@
       top: 28%;
       animation-delay: -3s;
       background: #fff;
-      opacity: .36 !important;
+      opacity: .36;
     }
 
     .liquid.three {
@@ -267,7 +267,7 @@
       filter: blur(34px);
       transform: rotate(-25deg);
       animation: prism var(--prism-duration) ease-in-out infinite alternate;
-      opacity: calc(.32 + var(--treble) * .55) !important;
+      opacity: calc(.32 + var(--treble) * .55);
     }
 
     .prism.two {
@@ -346,7 +346,7 @@
       margin: 0;
       font-size: clamp(70px, 10vw, 190px);
       line-height: .81;
-      letter-spacing: -.095em;
+      letter-spacing: -.02em;
       font-weight: 820;
       text-transform: uppercase;
       text-shadow: 0 12px 80px rgba(15, 8, 45, .18);
