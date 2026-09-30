@@ -21,6 +21,7 @@
     };
     // One color per beat, so a BPM reading maps straight onto the ambient timer period.
     const flowIntervalFor = bpm => Math.round(60000 / clamp(bpm, FLOW_BPM_MIN, FLOW_BPM_MAX));
+    const ambientIntervalFor = bpm => Math.max(flowIntervalFor(bpm), motionPreference.matches ? 1100 : 0);
     const effectDurationFor = (effect, step) => interpolate(motionDurations[effect], step);
     const tierName = (names, step) => names[clamp(Math.floor((step - 1) / TIER_STEPS), 0, names.length - 1)];
     const speedFill = step => (step - 1) / (SPEED_STEPS - 1) * 100;
@@ -175,7 +176,7 @@
     // The timer tick stays frozen while paused, so the guard lives here and not in the picker.
     function applyRandomColor() { applyColor(Math.floor(random(0, 360)), random(62, 92), random(42, 62)); const now = performance.now(); if (!lastAmbientHudUpdate || now - lastAmbientHudUpdate >= 100) { updateHud(); lastAmbientHudUpdate = now; } }
     function selectAmbientColor() { if (!state.paused && state.mic === 'off') applyRandomColor(); }
-    function scheduleAmbient() { clearInterval(ambientTimer); ambientTimer = null; if (state.mic === 'off' && !state.paused) ambientTimer = setInterval(selectAmbientColor, Math.max(flowIntervalFor(state.flow), motionPreference.matches ? 1100 : 0)); }
+    function scheduleAmbient() { clearInterval(ambientTimer); ambientTimer = null; if (state.mic === 'off' && !state.paused) ambientTimer = setInterval(selectAmbientColor, ambientIntervalFor(state.flow)); }
     // A click is an explicit user action, so it re-keys the colour even while paused.
     function shiftColor() {
       if (state.mic === 'on') {
@@ -382,7 +383,7 @@
     new ResizeObserver(resizeCanvas).observe(canvas);
 
     function syncFlowSpeed() {
-      const input = $('#flow-speed'), interval = flowIntervalFor(state.flow);
+      const input = $('#flow-speed'), interval = ambientIntervalFor(state.flow);
       input.value = state.flow;
       input.style.setProperty('--fill', `${flowFill(state.flow)}%`);
       input.setAttribute('aria-valuetext', `${state.flow} beats per minute, one color every ${interval >= 1000 ? `${(interval / 1000).toFixed(2)} seconds` : `${interval} milliseconds`}`);
@@ -433,9 +434,10 @@
     // the visualizer is visible, which is what a long-running fullscreen color piece needs. The browser
     // drops the lock on its own whenever the page is hidden, so it must be re-acquired on return.
     // Unsupported or denied locks fail quietly and the visualizer stays fully usable.
-    let screenWakeLock = null, wakeLockPending = false;
+    let screenWakeLock = null, wakeLockPending = false, wakeLockRetryQueued = false;
     async function keepScreenAwake() {
-      if (screenWakeLock || wakeLockPending || document.visibilityState !== 'visible' || !navigator.wakeLock?.request) return;
+      if (screenWakeLock || document.visibilityState !== 'visible' || !navigator.wakeLock?.request) return;
+      if (wakeLockPending) { wakeLockRetryQueued = true; return; }
       wakeLockPending = true;
       try {
         const lock = await navigator.wakeLock.request('screen');
@@ -447,6 +449,9 @@
         console.warn('Screen wake lock unavailable:', error.name || error);
       } finally {
         wakeLockPending = false;
+        const retryQueued = wakeLockRetryQueued;
+        wakeLockRetryQueued = false;
+        if (retryQueued && document.visibilityState === 'visible' && !screenWakeLock) keepScreenAwake();
       }
     }
     async function releaseScreenWakeLock() {
@@ -465,7 +470,7 @@
     // selectable and copyable instead of re-keying the color underneath the user.
     visualizer.addEventListener('click', event => { if (!event.target.closest('.hud, button, input, summary, a[href]')) shiftColor(); });
     document.addEventListener('keydown', event => { if (event.code !== 'Space' || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return; const target = event.target; if (target.closest('button, input, summary, a[href], select, textarea, [contenteditable="true"]') || target.isContentEditable) return; event.preventDefault(); setPause(!state.paused); });
-    motionPreference.addEventListener('change', () => { scheduleAmbient(); if (motionPreference.matches) { visualizer.style.setProperty('--beat', 0); $('#beat-layer').replaceChildren(); } state.lastReactivePaint = 0; });
+    motionPreference.addEventListener('change', () => { syncFlowSpeed(); scheduleAmbient(); if (motionPreference.matches) { visualizer.style.setProperty('--beat', 0); $('#beat-layer').replaceChildren(); } state.lastReactivePaint = 0; });
     // A bfcache restore cannot revive the AudioContext, and the browser does not resume the rAF
     // loop or the ambient interval, so the UI must never outlive the audio layer. pagehide tears
     // the microphone down through the same path as a user toggle; pageshow re-asserts the timer.
